@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init)",
+      "Bash(git add docs/plans/2026-02-08-bucket-db-design.md)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\ndocs: add initial bucket-db design document\n\nAdd comprehensive design document for BucketDB v0.1.0, covering:\n- Architecture and data organization\n- API design with TypeScript type safety\n- Query execution and indexing strategy\n- Concurrency control with optimistic locking\n- Monorepo structure with Bun\n- NPM publishing strategy\n- Development roadmap\nEOF\n\\)\")",
+      "Bash(bun install)",
+      "Bash(bun pm ls)",
+      "Bash(git add .)"
+    ]
+  }
+}

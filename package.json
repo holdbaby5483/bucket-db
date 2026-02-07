@@ -1,0 +1,19 @@
+{
+  "name": "bucket-db",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "test": "bun test",
+    "build": "bun run --filter='@bucket-db/*' build",
+    "dev": "bun run --filter='@bucket-db/core' dev"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.3.3"
+  }
+}
