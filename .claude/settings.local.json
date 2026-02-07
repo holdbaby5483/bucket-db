@@ -14,7 +14,9 @@
       "Bash(bun test storage/memory-adapter.test.ts)",
       "Bash(bun test packages/core/tests/storage/memory-adapter.test.ts)",
       "Bash(bun test ./packages/core/tests/storage/memory-adapter.test.ts)",
-      "Bash(git commit -m \"feat: implement MemoryStorageAdapter for testing\")"
+      "Bash(git commit -m \"feat: implement MemoryStorageAdapter for testing\")",
+      "Bash(bun test ./packages/core/tests/query/evaluator.test.ts)",
+      "Bash(git commit -m \"feat: implement query evaluation engine\")"
     ]
   }
 }
