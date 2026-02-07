@@ -6,7 +6,15 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\ndocs: add initial bucket-db design document\n\nAdd comprehensive design document for BucketDB v0.1.0, covering:\n- Architecture and data organization\n- API design with TypeScript type safety\n- Query execution and indexing strategy\n- Concurrency control with optimistic locking\n- Monorepo structure with Bun\n- NPM publishing strategy\n- Development roadmap\nEOF\n\\)\")",
       "Bash(bun install)",
       "Bash(bun pm ls)",
-      "Bash(git add .)"
+      "Bash(git add .)",
+      "Bash(git commit -m \"chore: initialize monorepo with Bun workspaces\")",
+      "Bash(bun run build)",
+      "Bash(git add packages/types/)",
+      "Bash(git commit -m \"feat: add core type definitions and interfaces\")",
+      "Bash(bun test storage/memory-adapter.test.ts)",
+      "Bash(bun test packages/core/tests/storage/memory-adapter.test.ts)",
+      "Bash(bun test ./packages/core/tests/storage/memory-adapter.test.ts)",
+      "Bash(git commit -m \"feat: implement MemoryStorageAdapter for testing\")"
     ]
   }
 }
