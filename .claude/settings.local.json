@@ -19,7 +19,9 @@
       "Bash(git commit -m \"feat: implement query evaluation engine\")",
       "Bash(bun test ./packages/core/tests/utils/hash.test.ts)",
       "Bash(bun test ./packages/core/tests/index/shard-manager.test.ts)",
-      "Bash(git commit -m \"feat: implement index shard manager with query support\")"
+      "Bash(git commit -m \"feat: implement index shard manager with query support\")",
+      "Bash(bun test ./packages/core/tests/core/collection.test.ts)",
+      "Bash(git commit -m \"feat: implement Collection with CRUD operations\")"
     ]
   }
 }
