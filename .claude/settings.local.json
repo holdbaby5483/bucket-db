@@ -21,7 +21,18 @@
       "Bash(bun test ./packages/core/tests/index/shard-manager.test.ts)",
       "Bash(git commit -m \"feat: implement index shard manager with query support\")",
       "Bash(bun test ./packages/core/tests/core/collection.test.ts)",
-      "Bash(git commit -m \"feat: implement Collection with CRUD operations\")"
+      "Bash(git commit -m \"feat: implement Collection with CRUD operations\")",
+      "Bash(bun test ./packages/core/tests/core/bucket-db.test.ts)",
+      "Bash(bun test)",
+      "Bash(git commit -m \"feat: implement BucketDB main class and exports\")",
+      "Bash(bun test ./packages/core/tests/storage/s3-adapter.test.ts)",
+      "Bash(bun test tests/storage/s3-adapter.test.ts)",
+      "Bash(git commit -m \"feat: implement S3 storage adapter\")",
+      "Bash(bun test tests/storage/oss-adapter.test.ts)",
+      "Bash(git commit -m \"feat: implement OSS storage adapter\")",
+      "Bash(bun run examples/basic-usage/index.ts)",
+      "Bash(bun run ./examples/basic-usage/index.ts)",
+      "Bash(git commit -m \"docs: add README and basic usage example\")"
     ]
   }
 }

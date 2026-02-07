@@ -1,0 +1,12 @@
+{
+  "name": "basic-usage-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@bucket-db/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}
