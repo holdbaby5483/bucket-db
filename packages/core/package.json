@@ -11,8 +11,8 @@
     }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun --sourcemap",
-    "dev": "bun build ./src/index.ts --outdir ./dist --target bun --watch",
+    "build": "tsc",
+    "dev": "tsc --watch",
     "test": "bun test",
     "test:watch": "bun test --watch"
   },
@@ -24,5 +24,23 @@
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.3.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "database",
+    "document-db",
+    "s3",
+    "oss",
+    "typescript",
+    "cloud-storage"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/bucket-db.git",
+    "directory": "packages/core"
   }
 }
