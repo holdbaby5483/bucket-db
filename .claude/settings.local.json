@@ -38,7 +38,10 @@
       "Bash(bun run examples/dbpath-demo/index.ts)",
       "Bash(bun test tests/storage/fs-adapter.test.ts)",
       "Bash(bun run examples/local-storage/index.ts)",
-      "Bash(git commit -m \"feat: add FileSystemAdapter for local storage support\")"
+      "Bash(git commit -m \"feat: add FileSystemAdapter for local storage support\")",
+      "Bash(git add .gitignore)",
+      "Bash(git commit -m \"chore: ignore local database files\")",
+      "Bash(git commit -m \"docs: add FileSystemAdapter documentation\")"
     ]
   }
 }
