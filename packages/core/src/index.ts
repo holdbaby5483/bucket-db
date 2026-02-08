@@ -6,6 +6,7 @@ export { Collection } from './core/collection.js';
 export { MemoryStorageAdapter } from './storage/memory-adapter.js';
 export { S3Adapter } from './storage/s3-adapter.js';
 export { OSSAdapter } from './storage/oss-adapter.js';
+export { FileSystemAdapter } from './storage/fs-adapter.js';
 
 // Re-export types from @bucket-db/types
 export type {

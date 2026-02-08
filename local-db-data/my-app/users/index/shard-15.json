@@ -1,0 +1,15 @@
+{
+  "shardId": "15",
+  "documents": {
+    "435cfd91-a949-49db-bd6e-60b6da40c820": {
+      "name": "Bob",
+      "age": 30,
+      "email": "bob@example.com",
+      "status": "active",
+      "id": "435cfd91-a949-49db-bd6e-60b6da40c820",
+      "_createdAt": "2026-02-08T04:40:38.918Z",
+      "_updatedAt": "2026-02-08T04:40:38.918Z",
+      "_etag": "8dd81c67823fd9d3d5c9ca81e4ede77b"
+    }
+  }
+}

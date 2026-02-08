@@ -33,7 +33,12 @@
       "Bash(bun run examples/basic-usage/index.ts)",
       "Bash(bun run ./examples/basic-usage/index.ts)",
       "Bash(git commit -m \"docs: add README and basic usage example\")",
-      "Bash(git commit -m \"chore: prepare packages for publishing\")"
+      "Bash(git commit -m \"chore: prepare packages for publishing\")",
+      "Bash(bun test tests/core/dbpath.test.ts)",
+      "Bash(bun run examples/dbpath-demo/index.ts)",
+      "Bash(bun test tests/storage/fs-adapter.test.ts)",
+      "Bash(bun run examples/local-storage/index.ts)",
+      "Bash(git commit -m \"feat: add FileSystemAdapter for local storage support\")"
     ]
   }
 }

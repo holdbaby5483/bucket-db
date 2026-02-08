@@ -1,14 +1,14 @@
 # BucketDB
 
-A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS).
+A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
 
 ## Features
 
-- 🚀 Use cloud object storage as backend - no database servers needed
+- 🚀 Use cloud object storage or local files as backend - no database servers needed
 - 📦 Type-safe TypeScript API with full type inference
 - 🔍 Flexible document queries (equality and comparison operators)
 - 🔒 Optimistic locking via ETag for concurrency control
-- ☁️ Support for AWS S3 and Alibaba Cloud OSS with unified API
+- ☁️ Support for AWS S3, Alibaba Cloud OSS, and local file system with unified API
 - 🎯 Collections organize documents with independent indexes
 - 📊 Sharded index design scales to hundreds of thousands of documents
 
@@ -20,8 +20,10 @@ bun add @bucket-db/core
 
 ## Quick Start
 
+### Using Local File System (Development)
+
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
 import type { Document } from '@bucket-db/core';
 
 interface User extends Document {
@@ -31,8 +33,10 @@ interface User extends Document {
   status: 'active' | 'inactive';
 }
 
-// Create database with memory adapter (for testing)
-const adapter = new MemoryStorageAdapter();
+// Create database with local file system adapter
+const adapter = new FileSystemAdapter({
+  basePath: './my-database',
+});
 const db = new BucketDB(adapter, 'my-app');
 
 // Get collection
@@ -58,6 +62,16 @@ const updated = await users.update(user.id, { age: 26 }, { etag: user._etag });
 
 // Delete
 await users.delete(user.id);
+```
+
+### Using Memory Storage (Testing)
+
+```typescript
+import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
+
+// Create database with memory adapter (for testing)
+const adapter = new MemoryStorageAdapter();
+const db = new BucketDB(adapter, 'my-app');
 ```
 
 ## Using S3
@@ -102,6 +116,13 @@ const db = new BucketDB(adapter, 'production');
 - `$lt`, `$lte` - Less than, less than or equal
 - `$in` - In array
 - `$nin` - Not in array
+
+## Storage Adapters
+
+- **FileSystemAdapter** - Local file system storage (great for development)
+- **MemoryStorageAdapter** - In-memory storage (for testing)
+- **S3Adapter** - AWS S3 storage (for production)
+- **OSSAdapter** - Alibaba Cloud OSS storage (for production)
 
 ## Packages
 
