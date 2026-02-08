@@ -7,3 +7,5 @@ dist/
 *.tsbuildinfo
 coverage/
 .bun/
+local-db-data/
+examples/*/local-db-data/
