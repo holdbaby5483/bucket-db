@@ -15,7 +15,7 @@ interface Document {
 
 All collection documents must extend this interface.
 
-### InsertDocument<T>
+### InsertDocument&lt;T&gt;
 
 Type for inserting new documents (omits system fields).
 
@@ -26,7 +26,7 @@ type InsertDocument<T extends Document> = Omit<
 >;
 ```
 
-### UpdateDocument<T>
+### UpdateDocument&lt;T&gt;
 
 Type for updating documents (partial update without id).
 
@@ -34,7 +34,7 @@ Type for updating documents (partial update without id).
 type UpdateDocument<T extends Document> = Partial<Omit<T, 'id'>>;
 ```
 
-### QueryFilter<T>
+### QueryFilter&lt;T&gt;
 
 Query filter for type-safe queries.
 
@@ -44,7 +44,7 @@ type QueryFilter<T> = {
 };
 ```
 
-### QueryValue<T>
+### QueryValue&lt;T&gt;
 
 Query value can be direct value or operator object.
 

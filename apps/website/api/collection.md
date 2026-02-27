@@ -2,13 +2,13 @@
 
 集合类,提供类型安全的 CRUD 操作。
 
-### Collection<T>
+### Collection&lt;T&gt;
 
 Type-safe collection for CRUD operations.
 
 #### Methods
 
-##### `insert(data: InsertDocument<T>): Promise<T>`
+##### `insert(data: InsertDocument&lt;T&gt;): Promise&lt;T&gt;`
 
 Insert a new document.
 
@@ -43,7 +43,7 @@ if (user) {
 }
 ```
 
-##### `find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]>`
+##### `find(filter: QueryFilter&lt;T&gt;, options?: QueryOptions): Promise<T[]>`
 
 Query documents with filter.
 
@@ -74,7 +74,7 @@ const page1 = await users.find({}, { limit: 10, offset: 0 });
 const page2 = await users.find({}, { limit: 10, offset: 10 });
 ```
 
-##### `update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>`
+##### `update(id: string, data: UpdateDocument&lt;T&gt;, options?: UpdateOptions): Promise&lt;T&gt;`
 
 Update existing document.
 
@@ -104,7 +104,7 @@ const updated = await users.update(
 );
 ```
 
-##### `delete(id: string): Promise<void>`
+##### `delete(id: string): Promise&lt;void&gt;`
 
 Delete document.
 
