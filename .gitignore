@@ -10,3 +10,9 @@ coverage/
 local-db-data/
 examples/*/local-db-data/
 .claude/settings.local.json
+
+# Website
+apps/website/.vitepress/cache
+apps/website/.vitepress/dist
+apps/website/api/*.md
+!apps/website/api/index.md

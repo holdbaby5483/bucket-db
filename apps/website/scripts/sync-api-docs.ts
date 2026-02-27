@@ -41,6 +41,20 @@ generateErrorsPage(sections);
 console.log('✅ API 文档同步完成');
 
 /**
+ * 转义 Markdown 标题中的 HTML 特殊字符
+ * VitePress/Vue 会把 <T> 解析为 HTML 标签，需要转义
+ */
+function escapeMarkdownHeadings(content: string): string {
+  return content.split('\n').map(line => {
+    // 只处理标题行 (以 # 开头)
+    if (line.match(/^#{1,6}\s/)) {
+      return line.replace(/<(\w+)>/g, '&lt;$1&gt;');
+    }
+    return line;
+  }).join('\n');
+}
+
+/**
  * 按二级标题拆分内容
  */
 function splitSections(content: string): Map<string, string> {
@@ -211,7 +225,7 @@ function generateCollectionPage(sections: Map<string, string>) {
 ${extractSubsection(coreSection, 'Collection<T>')}
 `;
 
-  writeFileSync(join(TARGET_DIR, 'collection.md'), content);
+  writeFileSync(join(TARGET_DIR, 'collection.md'), escapeMarkdownHeadings(content));
   console.log('  ✓ api/collection.md');
 }
 
@@ -221,7 +235,7 @@ ${extractSubsection(coreSection, 'Collection<T>')}
 function generateAdaptersPage(sections: Map<string, string>) {
   const content = sections.get('Storage Adapters') || '';
 
-  writeFileSync(join(TARGET_DIR, 'adapters.md'), content);
+  writeFileSync(join(TARGET_DIR, 'adapters.md'), escapeMarkdownHeadings(content));
   console.log('  ✓ api/adapters.md');
 }
 
@@ -231,7 +245,7 @@ function generateAdaptersPage(sections: Map<string, string>) {
 function generateTypesPage(sections: Map<string, string>) {
   const content = sections.get('Type Definitions') || '';
 
-  writeFileSync(join(TARGET_DIR, 'types.md'), content);
+  writeFileSync(join(TARGET_DIR, 'types.md'), escapeMarkdownHeadings(content));
   console.log('  ✓ api/types.md');
 }
 
@@ -241,7 +255,7 @@ function generateTypesPage(sections: Map<string, string>) {
 function generateErrorsPage(sections: Map<string, string>) {
   const content = sections.get('Error Classes') || '';
 
-  writeFileSync(join(TARGET_DIR, 'errors.md'), content);
+  writeFileSync(join(TARGET_DIR, 'errors.md'), escapeMarkdownHeadings(content));
   console.log('  ✓ api/errors.md');
 }
 
