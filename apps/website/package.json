@@ -1,0 +1,17 @@
+{
+  "name": "@bucket-db/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "bun run sync && vitepress build",
+    "preview": "vitepress preview",
+    "sync": "bun run scripts/sync-api-docs.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "vitepress": "^1.0.0",
+    "vue": "^3.4.0"
+  }
+}
