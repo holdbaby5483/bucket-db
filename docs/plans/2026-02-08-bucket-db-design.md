@@ -2,6 +2,35 @@
 
 **日期**: 2026-02-08
 **版本**: v0.1.0 设计
+**状态**: ✅ MVP 已完成 (Updated 2026-02-08)
+
+---
+
+## 📊 实现状态总览
+
+### ✅ 已完成功能
+- ✅ 完整的 TypeScript 类型系统
+- ✅ 4 种存储适配器（Memory, FileSystem, S3, OSS）
+- ✅ 分片索引系统（16 分片，可配置）
+- ✅ 完整的 CRUD 操作
+- ✅ 8 种查询操作符（$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin）
+- ✅ 分页查询（limit, offset）
+- ✅ ETag 乐观锁
+- ✅ dbPath 多数据库支持
+- ✅ 89 个自动化测试（全部通过）
+- ✅ 3 个示例项目
+
+### 📦 包结构
+- `@bucket-db/core` - 核心引擎（已实现）
+- `@bucket-db/types` - 类型定义（已实现）
+
+### 📝 待办事项
+- [ ] NPM 发布
+- [ ] 性能基准测试文档
+- [ ] API 完整文档
+- [ ] Phase 2 功能（批量操作、更多操作符、排序等）
+
+---
 
 ## 概述
 
@@ -560,22 +589,35 @@ GitHub Actions 自动化发布流程：
 
 ## 开发路线图
 
-### Phase 1 - MVP 核心功能（v0.1.0）
+### Phase 1 - MVP 核心功能（v0.1.0） ✅ **已完成**
 
 **目标**：实现基本可用的文档数据库
 
 - ✅ Monorepo 结构搭建（Bun workspaces）
-- ✅ StorageAdapter 接口和 S3Adapter 实现
-- ✅ OSS Adapter 实现
-- ✅ 分片索引管理
-- ✅ 文档 CRUD 操作
-- ✅ 查询引擎（等值查询 + 比较操作符）
-- ✅ 分页支持
-- ✅ 乐观锁并发控制
+- ✅ StorageAdapter 接口和实现
+  - ✅ MemoryStorageAdapter（测试用）
+  - ✅ FileSystemAdapter（本地开发）
+  - ✅ S3Adapter（AWS 生产环境）
+  - ✅ OSSAdapter（阿里云生产环境）
+- ✅ 分片索引管理（默认 16 个分片，可配置）
+- ✅ 文档 CRUD 操作（insert, findById, find, update, delete）
+- ✅ 查询引擎（等值查询 + 比较操作符：$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin）
+- ✅ 分页支持（limit, offset）
+- ✅ 乐观锁并发控制（基于 ETag）
 - ✅ 完整的 TypeScript 类型系统
-- ✅ 单元测试和集成测试
+- ✅ 单元测试和集成测试（89 个测试通过）
 - ✅ 基础文档和示例
-- ✅ NPM 发布配置
+  - ✅ basic-usage 示例
+  - ✅ local-storage 示例
+  - ✅ dbpath-demo 示例（多数据库/多租户）
+- ✅ dbPath 支持（多数据库/多租户隔离）
+- ⏸️ NPM 发布配置（待发布）
+
+**实现亮点**：
+- FileSystemAdapter 允许完全在本地开发，无需云服务
+- dbPath 功能实现多环境/多租户隔离
+- 完整的 ETag 乐观锁实现，支持并发安全
+- 89 个自动化测试保证代码质量
 
 ### Phase 2 - 增强功能（v0.2.0）
 

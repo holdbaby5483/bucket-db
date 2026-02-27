@@ -9,3 +9,4 @@ coverage/
 .bun/
 local-db-data/
 examples/*/local-db-data/
+.claude/settings.local.json
