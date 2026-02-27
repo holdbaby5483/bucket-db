@@ -126,6 +126,13 @@ const db = new BucketDB(adapter, 'production');
 
 ## Documentation
 
+📚 **官方网站**: https://bucket-db.vercel.app
+
+- [快速开始](https://bucket-db.vercel.app/guide/) - 5 分钟上手教程
+- [API 参考](https://bucket-db.vercel.app/api/) - 完整的 API 文档
+- [示例](https://bucket-db.vercel.app/examples/) - 实际使用示例
+
+**本地文档**:
 - [API Reference](docs/API.md) - Complete API documentation
 - [Contributing Guide](CONTRIBUTING.md) - How to contribute to the project
 - [Design Document](docs/plans/2026-02-08-bucket-db-design.md) - Architecture and design decisions
