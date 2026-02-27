@@ -124,10 +124,24 @@ const db = new BucketDB(adapter, 'production');
 - **S3Adapter** - AWS S3 storage (for production)
 - **OSSAdapter** - Alibaba Cloud OSS storage (for production)
 
+## Documentation
+
+- [API Reference](docs/API.md) - Complete API documentation
+- [Contributing Guide](CONTRIBUTING.md) - How to contribute to the project
+- [Design Document](docs/plans/2026-02-08-bucket-db-design.md) - Architecture and design decisions
+- [Implementation Status](docs/plans/IMPLEMENTATION_STATUS.md) - Current implementation status
+
 ## Packages
 
 - `@bucket-db/core` - Core database engine
 - `@bucket-db/types` - TypeScript type definitions
+
+## Examples
+
+Check out the [examples](examples/) directory for more usage examples:
+- [basic-usage](examples/basic-usage/) - Basic CRUD operations
+- [local-storage](examples/local-storage/) - FileSystemAdapter usage
+- [dbpath-demo](examples/dbpath-demo/) - Multi-database isolation
 
 ## Development
 
