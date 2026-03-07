@@ -16,6 +16,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -47,16 +53,14 @@ jobs:
           sed -i "s/@bucket-db\/types\": \"workspace:\*\"/@bucket-db\/types\": \"^$VERSION\"/" package.json
 
       - name: Publish @bucket-db/types
-        run: |
-          cd packages/types
-          npm publish --provenance --access public
+        working-directory: packages/types
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @bucket-db/core
-        run: |
-          cd packages/core
-          npm publish --provenance --access public
+        working-directory: packages/core
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
