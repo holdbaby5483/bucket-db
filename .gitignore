@@ -10,6 +10,7 @@ coverage/
 local-db-data/
 examples/*/local-db-data/
 .claude/settings.local.json
+.npmrc.local
 
 # Website
 apps/website/.vitepress/cache
