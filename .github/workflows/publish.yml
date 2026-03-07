@@ -49,7 +49,7 @@ jobs:
           # 更新 core 包版本（同时更新依赖的 types 版本）
           cd ../core
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-          sed -i "s/@bucket-db\/types\": \"workspace:\*\"/@bucket-db\/types\": \"^$VERSION\"/" package.json
+          sed -i "s/@hold-baby\/bucket-db-types\": \"workspace:\*\"/@hold-baby\/bucket-db-types\": \"^$VERSION\"/" package.json
 
       - name: Verify npm token
         run: |
@@ -62,13 +62,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @bucket-db/types
+      - name: Publish @hold-baby/bucket-db-types
         working-directory: packages/types
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish @bucket-db/core
+      - name: Publish @hold-baby/bucket-db-core
         working-directory: packages/core
         run: npm publish --access public
         env:
@@ -84,12 +84,12 @@ jobs:
           body: |
             ## 📦 Published to npm
 
-            - `@bucket-db/types@${{ steps.version.outputs.VERSION }}`
-            - `@bucket-db/core@${{ steps.version.outputs.VERSION }}`
+            - `@hold-baby/bucket-db-types@${{ steps.version.outputs.VERSION }}`
+            - `@hold-baby/bucket-db-core@${{ steps.version.outputs.VERSION }}`
 
             Install:
             ```bash
-            bun add @bucket-db/core
+            bun add @hold-baby/bucket-db-core
             ```
           draft: false
           prerelease: false

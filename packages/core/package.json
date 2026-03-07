@@ -1,5 +1,5 @@
 {
-  "name": "@bucket-db/core",
+  "name": "@hold-baby/bucket-db-core",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,7 @@
     "test:watch": "bun test --watch"
   },
   "dependencies": {
-    "@bucket-db/types": "workspace:*",
+    "@hold-baby/bucket-db-types": "workspace:*",
     "@aws-sdk/client-s3": "^3.490.0",
     "ali-oss": "^6.18.1"
   },
