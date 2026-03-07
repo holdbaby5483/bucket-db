@@ -52,7 +52,7 @@ bun run build
 bun run preview
 ```
 
-访问 http://localhost:4173 查看构建结果
+访问 `http://localhost:4173` 查看构建结果
 
 ### Vercel 备选方案
 
