@@ -52,6 +52,17 @@ jobs:
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
           sed -i "s/@bucket-db\/types\": \"workspace:\*\"/@bucket-db\/types\": \"^$VERSION\"/" package.json
 
+      - name: Verify npm token
+        run: |
+          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "❌ NPM_TOKEN is empty"
+            exit 1
+          fi
+          echo "✅ NPM_TOKEN is set (length: ${#NODE_AUTH_TOKEN})"
+          echo "Token prefix: ${NODE_AUTH_TOKEN:0:4}..."
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish @bucket-db/types
         working-directory: packages/types
         run: npm publish --provenance --access public
