@@ -39,11 +39,11 @@ jobs:
 
           # 更新 types 包版本
           cd packages/types
-          npm version $VERSION --no-git-tag-version
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
 
           # 更新 core 包版本（同时更新依赖的 types 版本）
           cd ../core
-          npm version $VERSION --no-git-tag-version
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
           sed -i "s/@bucket-db\/types\": \"workspace:\*\"/@bucket-db\/types\": \"^$VERSION\"/" package.json
 
       - name: Setup npm auth
