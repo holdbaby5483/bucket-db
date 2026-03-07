@@ -1,5 +1,9 @@
 # BucketDB
 
+[![npm version](https://img.shields.io/npm/v/@hold-baby/bucket-db-core.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db-core)
+[![npm downloads](https://img.shields.io/npm/dm/@hold-baby/bucket-db-core.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db-core)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
 
 ## Features

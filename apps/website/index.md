@@ -11,7 +11,10 @@ hero:
       link: /guide/
     - theme: alt
       text: 查看 GitHub
-      link: https://github.com/hold-baby/bucket-db
+      link: https://github.com/holdbaby5483/bucket-db
+    - theme: alt
+      text: npm 包
+      link: https://www.npmjs.com/package/@hold-baby/bucket-db-core
 
 features:
   - icon: 🚀
@@ -43,8 +46,8 @@ features:
 ## 快速示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -103,10 +106,10 @@ await users.delete(user.id);
 
 ```bash
 # 安装
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 
 # 或使用 npm
-npm install @bucket-db/core
+npm install @hold-baby/bucket-db-core
 ```
 
 立即查看[快速开始指南](/guide/),5 分钟完成第一个应用。

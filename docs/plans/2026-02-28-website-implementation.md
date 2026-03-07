@@ -286,8 +286,8 @@ features:
 ## 快速示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -346,10 +346,10 @@ await users.delete(user.id);
 
 ```bash
 # 安装
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 
 # 或使用 npm
-npm install @bucket-db/core
+npm install @hold-baby/bucket-db-core
 ```
 
 立即查看[快速开始指南](/guide/)，5 分钟完成第一个应用。
@@ -387,7 +387,7 @@ Create: `apps/website/guide/index.md`
 ## 安装
 
 ```bash
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 ```
 
 详见[安装指南](./installation)了解更多安装方式。
@@ -397,7 +397,7 @@ bun add @bucket-db/core
 ### 1. 定义文档类型
 
 ```typescript
-import type { Document } from '@bucket-db/core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -416,7 +416,7 @@ interface User extends Document {
 ### 2. 创建数据库实例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
 
 const db = new BucketDB(
   new FileSystemAdapter({ basePath: './my-database' }),
@@ -513,8 +513,8 @@ await users.delete(alice.id);
 ## 完整示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -598,30 +598,30 @@ Create: `apps/website/guide/installation.md`
 ### 使用 Bun（推荐）
 
 ```bash
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 ```
 
 ### 使用 npm
 
 ```bash
-npm install @bucket-db/core
+npm install @hold-baby/bucket-db-core
 ```
 
 ### 使用 yarn
 
 ```bash
-yarn add @bucket-db/core
+yarn add @hold-baby/bucket-db-core
 ```
 
 ### 使用 pnpm
 
 ```bash
-pnpm add @bucket-db/core
+pnpm add @hold-baby/bucket-db-core
 ```
 
 ## 依赖说明
 
-BucketDB 核心包 (`@bucket-db/core`) 包含：
+BucketDB 核心包 (`@hold-baby/bucket-db-core`) 包含：
 - 核心数据库引擎
 - 所有类型定义
 - MemoryStorageAdapter（内存存储）
@@ -657,7 +657,7 @@ BucketDB 核心包 (`@bucket-db/core`) 包含：
 创建 `test.ts` 文件：
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
 
 const db = new BucketDB(new MemoryStorageAdapter(), 'test');
 console.log('BucketDB installed successfully!');
@@ -1223,7 +1223,7 @@ import {
   ConcurrentUpdateError,
   ValidationError,
   StorageError
-} from '@bucket-db/core';
+} from '@hold-baby/bucket-db-core';
 ```
 
 ## DocumentNotFoundError
@@ -1420,7 +1420,7 @@ const user = await handleDBOperation(() =>
 ### 2. Express 中间件
 
 ```typescript
-import { BucketDBError } from '@bucket-db/core';
+import { BucketDBError } from '@hold-baby/bucket-db-core';
 import type { Request, Response, NextFunction } from 'express';
 
 function errorHandler(
@@ -1571,7 +1571,7 @@ try {
 ### 1. 启用详细日志
 
 ```typescript
-import { BucketDB, StorageError } from '@bucket-db/core';
+import { BucketDB, StorageError } from '@hold-baby/bucket-db-core';
 
 try {
   // 操作
@@ -1741,14 +1741,14 @@ BucketDB 完整的 API 文档。
 ## 安装
 
 \`\`\`bash
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 \`\`\`
 
 ## 基础用法
 
 \`\`\`typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -2011,8 +2011,8 @@ Create: `apps/website/examples/basic-usage.md`
 ## 完整代码
 
 \`\`\`typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 // 1. 定义文档类型
 interface User extends Document {
@@ -2241,8 +2241,8 @@ Create: `apps/website/examples/local-storage.md`
 ## 完整代码
 
 \`\`\`typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface Todo extends Document {
   title: string;

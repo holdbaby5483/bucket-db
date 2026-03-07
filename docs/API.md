@@ -42,7 +42,7 @@ new BucketDB(
 
 **Example:**
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
 
 const db = new BucketDB(
   new FileSystemAdapter({ basePath: './data' }),
@@ -209,7 +209,7 @@ new MemoryStorageAdapter()
 
 **Example:**
 ```typescript
-import { MemoryStorageAdapter } from '@bucket-db/core';
+import { MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new MemoryStorageAdapter();
 ```
@@ -237,7 +237,7 @@ new FileSystemAdapter(config: FileSystemAdapterConfig)
 
 **Example:**
 ```typescript
-import { FileSystemAdapter } from '@bucket-db/core';
+import { FileSystemAdapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new FileSystemAdapter({
   basePath: './my-database',
@@ -279,7 +279,7 @@ new S3Adapter(config: StorageAdapterConfig)
 
 **Example:**
 ```typescript
-import { S3Adapter } from '@bucket-db/core';
+import { S3Adapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -313,7 +313,7 @@ new OSSAdapter(config: StorageAdapterConfig)
 
 **Example:**
 ```typescript
-import { OSSAdapter } from '@bucket-db/core';
+import { OSSAdapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',

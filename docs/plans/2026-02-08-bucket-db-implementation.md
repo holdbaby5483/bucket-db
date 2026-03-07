@@ -90,7 +90,7 @@ From design document roadmap:
   "scripts": {
     "test": "bun test",
     "build": "bun run --filter='@bucket-db/*' build",
-    "dev": "bun run --filter='@bucket-db/core' dev"
+    "dev": "bun run --filter='@hold-baby/bucket-db-core' dev"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -152,7 +152,7 @@ coverage/
 
 ```json
 {
-  "name": "@bucket-db/types",
+  "name": "@hold-baby/bucket-db-types",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -192,7 +192,7 @@ coverage/
 
 ```json
 {
-  "name": "@bucket-db/core",
+  "name": "@hold-baby/bucket-db-core",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -210,7 +210,7 @@ coverage/
     "test:watch": "bun test --watch"
   },
   "dependencies": {
-    "@bucket-db/types": "workspace:*",
+    "@hold-baby/bucket-db-types": "workspace:*",
     "@aws-sdk/client-s3": "^3.490.0",
     "ali-oss": "^6.18.1"
   },
@@ -246,7 +246,7 @@ Expected: Dependencies installed successfully
 **Step 10: Verify workspace setup**
 
 Run: `bun pm ls`
-Expected: Shows @bucket-db/core and @bucket-db/types workspaces
+Expected: Shows @hold-baby/bucket-db-core and @hold-baby/bucket-db-types workspaces
 
 **Step 11: Commit**
 
@@ -559,7 +559,7 @@ git commit -m "feat: add core type definitions and interfaces"
 ```typescript
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import { StorageError } from '@bucket-db/types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 describe('MemoryStorageAdapter', () => {
   let adapter: MemoryStorageAdapter;
@@ -655,8 +655,8 @@ import type {
   StorageAdapter,
   StorageObject,
   PutOptions,
-} from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 interface StorageEntry {
   data: any;
@@ -895,7 +895,7 @@ Expected: FAIL - evaluator module not found
 **Step 3: Implement query evaluator**
 
 ```typescript
-import type { QueryValue, QueryFilter } from '@bucket-db/types';
+import type { QueryValue, QueryFilter } from '@hold-baby/bucket-db-types';
 
 /**
  * Evaluates a single operator condition
@@ -1098,7 +1098,7 @@ Expected: PASS - All tests passing
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ShardManager } from '../../src/index/shard-manager';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import type { IndexShard } from '@bucket-db/types';
+import type { IndexShard } from '@hold-baby/bucket-db-types';
 
 describe('ShardManager', () => {
   let adapter: MemoryStorageAdapter;
@@ -1234,8 +1234,8 @@ Expected: FAIL - ShardManager not found
 **Step 7: Implement ShardManager**
 
 ```typescript
-import type { StorageAdapter, IndexShard, QueryFilter } from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
+import type { StorageAdapter, IndexShard, QueryFilter } from '@hold-baby/bucket-db-types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 import { getShardId, formatShardId } from '../utils/hash.js';
 import { evaluateFilter } from '../query/evaluator.js';
 
@@ -1404,8 +1404,8 @@ git commit -m "feat: implement index shard manager with query support"
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Collection } from '../../src/core/collection';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import type { Document } from '@bucket-db/types';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '@bucket-db/types';
+import type { Document } from '@hold-baby/bucket-db-types';
+import { DocumentNotFoundError, ConcurrentUpdateError } from '@hold-baby/bucket-db-types';
 
 interface User extends Document {
   name: string;
@@ -1612,8 +1612,8 @@ import type {
   QueryOptions,
   UpdateOptions,
   StorageAdapter,
-} from '@bucket-db/types';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { DocumentNotFoundError, ConcurrentUpdateError } from '@hold-baby/bucket-db-types';
 import { ShardManager } from '../index/shard-manager.js';
 
 /**
@@ -1799,7 +1799,7 @@ git commit -m "feat: implement Collection with CRUD operations"
 import { describe, test, expect } from 'bun:test';
 import { BucketDB } from '../../src/core/bucket-db';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import type { Document } from '@bucket-db/types';
+import type { Document } from '@hold-baby/bucket-db-types';
 
 interface User extends Document {
   name: string;
@@ -1856,7 +1856,7 @@ Expected: FAIL - BucketDB not found
 **Step 3: Implement BucketDB class**
 
 ```typescript
-import type { StorageAdapter, Document } from '@bucket-db/types';
+import type { StorageAdapter, Document } from '@hold-baby/bucket-db-types';
 import { Collection, CollectionOptions } from './collection.js';
 
 export interface BucketDBOptions {
@@ -1911,7 +1911,7 @@ export { Collection } from './core/collection.js';
 // Storage adapters
 export { MemoryStorageAdapter } from './storage/memory-adapter.js';
 
-// Re-export types from @bucket-db/types
+// Re-export types from @hold-baby/bucket-db-types
 export type {
   Document,
   InsertDocument,
@@ -1929,7 +1929,7 @@ export type {
   ICollection,
   CollectionMeta,
   IndexShard,
-} from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
 
 export {
   BucketDBError,
@@ -1937,7 +1937,7 @@ export {
   ConcurrentUpdateError,
   ValidationError,
   StorageError,
-} from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
 ```
 
 **Step 5: Run test to verify it passes**
@@ -1975,7 +1975,7 @@ git commit -m "feat: implement BucketDB main class and exports"
 ```typescript
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { S3Adapter } from '../../src/storage/s3-adapter';
-import { StorageError } from '@bucket-db/types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 // Skip tests if no AWS credentials available
 const skipIfNoCredentials = process.env.AWS_ACCESS_KEY_ID ? test : test.skip;
@@ -2053,8 +2053,8 @@ import type {
   StorageObject,
   PutOptions,
   StorageAdapterConfig,
-} from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 /**
  * S3 storage adapter
@@ -2275,8 +2275,8 @@ import type {
   StorageObject,
   PutOptions,
   StorageAdapterConfig,
-} from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 /**
  * Alibaba Cloud OSS storage adapter
@@ -2441,14 +2441,14 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 ## Installation
 
 ```bash
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 ```
 
 ## Quick Start
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -2489,7 +2489,7 @@ await users.delete(user.id);
 ## Using S3
 
 ```typescript
-import { BucketDB, S3Adapter } from '@bucket-db/core';
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -2506,7 +2506,7 @@ const db = new BucketDB(adapter, 'production');
 ## Using Alibaba Cloud OSS
 
 ```typescript
-import { BucketDB, OSSAdapter } from '@bucket-db/core';
+import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db-core';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',
@@ -2531,8 +2531,8 @@ const db = new BucketDB(adapter, 'production');
 
 ## Packages
 
-- `@bucket-db/core` - Core database engine
-- `@bucket-db/types` - TypeScript type definitions
+- `@hold-baby/bucket-db-core` - Core database engine
+- `@hold-baby/bucket-db-types` - TypeScript type definitions
 
 ## Development
 
@@ -2555,7 +2555,7 @@ MIT
 **Step 2: Create packages/core/README.md**
 
 ```markdown
-# @bucket-db/core
+# @hold-baby/bucket-db-core
 
 Core database engine for BucketDB.
 
@@ -2605,7 +2605,7 @@ MIT
   "private": true,
   "type": "module",
   "dependencies": {
-    "@bucket-db/core": "workspace:*"
+    "@hold-baby/bucket-db-core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -2616,8 +2616,8 @@ MIT
 **Step 4: Create examples/basic-usage/index.ts**
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;

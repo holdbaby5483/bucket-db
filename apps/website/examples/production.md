@@ -7,8 +7,8 @@
 ### 配置 S3Adapter
 
 ```typescript
-import { BucketDB, S3Adapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;
@@ -48,8 +48,8 @@ S3_BUCKET=my-app-bucket
 ### 完整示例
 
 ```typescript
-import { BucketDB, S3Adapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface Product extends Document {
   name: string;
@@ -97,8 +97,8 @@ main().catch(console.error);
 ### 配置 OSSAdapter
 
 ```typescript
-import { BucketDB, OSSAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface Order extends Document {
   userId: string;
@@ -141,7 +141,7 @@ OSS_BUCKET=my-app-bucket
 ### 环境隔离策略
 
 ```typescript
-import { BucketDB, S3Adapter, FileSystemAdapter } from '@bucket-db/core';
+import { BucketDB, S3Adapter, FileSystemAdapter } from '@hold-baby/bucket-db-core';
 
 // 根据环境选择适配器
 function createAdapter() {
@@ -203,7 +203,7 @@ const adapter = new S3Adapter({
 ### 2. 错误处理
 
 ```typescript
-import { StorageError } from '@bucket-db/core';
+import { StorageError } from '@hold-baby/bucket-db-core';
 
 try {
   await users.insert({ name: 'Alice', email: 'alice@example.com' });
@@ -295,7 +295,7 @@ for await (const batch of getAllUsers()) {
 ## 监控和日志
 
 ```typescript
-import { BucketDB } from '@bucket-db/core';
+import { BucketDB } from '@hold-baby/bucket-db-core';
 
 class MonitoredDB {
   private db: BucketDB;

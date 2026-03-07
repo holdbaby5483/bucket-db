@@ -5,8 +5,8 @@
 ## 完整代码
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface Todo extends Document {
   title: string;

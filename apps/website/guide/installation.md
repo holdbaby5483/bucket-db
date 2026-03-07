@@ -12,30 +12,30 @@
 ### 使用 Bun（推荐）
 
 ```bash
-bun add @bucket-db/core
+bun add @hold-baby/bucket-db-core
 ```
 
 ### 使用 npm
 
 ```bash
-npm install @bucket-db/core
+npm install @hold-baby/bucket-db-core
 ```
 
 ### 使用 yarn
 
 ```bash
-yarn add @bucket-db/core
+yarn add @hold-baby/bucket-db-core
 ```
 
 ### 使用 pnpm
 
 ```bash
-pnpm add @bucket-db/core
+pnpm add @hold-baby/bucket-db-core
 ```
 
 ## 依赖说明
 
-BucketDB 核心包 (`@bucket-db/core`) 包含：
+BucketDB 核心包 (`@hold-baby/bucket-db-core`) 包含：
 - 核心数据库引擎
 - 所有类型定义
 - MemoryStorageAdapter（内存存储）
@@ -71,7 +71,7 @@ BucketDB 核心包 (`@bucket-db/core`) 包含：
 创建 `test.ts` 文件：
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
 
 const db = new BucketDB(new MemoryStorageAdapter(), 'test');
 console.log('BucketDB installed successfully!');
