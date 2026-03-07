@@ -36,11 +36,11 @@
     "typescript",
     "cloud-storage"
   ],
-  "author": "",
+  "author": "holdbaby5483",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/bucket-db.git",
+    "url": "https://github.com/holdbaby5483/bucket-db.git",
     "directory": "packages/core"
   }
 }

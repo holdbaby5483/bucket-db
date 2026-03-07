@@ -1,0 +1,81 @@
+name: Publish to npm
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # 触发条件：推送 v0.1.0 格式的 tag
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # 支持 npm provenance
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build packages
+        run: |
+          cd packages/types && bun run build
+          cd ../core && bun run build
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update package versions
+        run: |
+          VERSION=${{ steps.version.outputs.VERSION }}
+
+          # 更新 types 包版本
+          cd packages/types
+          npm version $VERSION --no-git-tag-version
+
+          # 更新 core 包版本（同时更新依赖的 types 版本）
+          cd ../core
+          npm version $VERSION --no-git-tag-version
+          sed -i "s/@bucket-db\/types\": \"workspace:\*\"/@bucket-db\/types\": \"^$VERSION\"/" package.json
+
+      - name: Setup npm auth
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
+      - name: Publish @bucket-db/types
+        run: |
+          cd packages/types
+          npm publish --provenance --access public
+
+      - name: Publish @bucket-db/core
+        run: |
+          cd packages/core
+          npm publish --provenance --access public
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## 📦 Published to npm
+
+            - `@bucket-db/types@${{ steps.version.outputs.VERSION }}`
+            - `@bucket-db/core@${{ steps.version.outputs.VERSION }}`
+
+            Install:
+            ```bash
+            bun add @bucket-db/core
+            ```
+          draft: false
+          prerelease: false
