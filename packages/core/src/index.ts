@@ -26,7 +26,7 @@ export type {
   ICollection,
   CollectionMeta,
   IndexShard,
-} from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
 
 export {
   BucketDBError,
@@ -34,4 +34,4 @@ export {
   ConcurrentUpdateError,
   ValidationError,
   StorageError,
-} from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';

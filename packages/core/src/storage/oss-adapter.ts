@@ -4,8 +4,8 @@ import type {
   StorageObject,
   PutOptions,
   StorageAdapterConfig,
-} from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { StorageError } from '@hold-baby/bucket-db-types';
 
 /**
  * Alibaba Cloud OSS storage adapter

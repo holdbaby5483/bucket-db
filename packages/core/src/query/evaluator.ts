@@ -1,4 +1,4 @@
-import type { QueryValue, QueryFilter } from '@bucket-db/types';
+import type { QueryValue, QueryFilter } from '@hold-baby/bucket-db-types';
 
 /**
  * Evaluates a single operator condition

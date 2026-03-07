@@ -7,8 +7,8 @@ import type {
   QueryOptions,
   UpdateOptions,
   StorageAdapter,
-} from '@bucket-db/types';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '@bucket-db/types';
+} from '@hold-baby/bucket-db-types';
+import { DocumentNotFoundError, ConcurrentUpdateError } from '@hold-baby/bucket-db-types';
 import { ShardManager } from '../index/shard-manager.js';
 
 /**
