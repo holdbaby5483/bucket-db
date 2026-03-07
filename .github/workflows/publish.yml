@@ -9,8 +9,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      id-token: write  # 支持 npm provenance
+      contents: write  # 创建 GitHub Release 需要
 
     steps:
       - name: Checkout code
@@ -65,13 +64,13 @@ jobs:
 
       - name: Publish @bucket-db/types
         working-directory: packages/types
-        run: npm publish --provenance --access public
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @bucket-db/core
         working-directory: packages/core
-        run: npm publish --provenance --access public
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
