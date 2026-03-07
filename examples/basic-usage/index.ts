@@ -1,5 +1,5 @@
-import { BucketDB, MemoryStorageAdapter } from '@bucket-db/core';
-import type { Document } from '@bucket-db/core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db-core';
 
 interface User extends Document {
   name: string;

@@ -9,8 +9,8 @@
   ],
   "scripts": {
     "test": "bun test",
-    "build": "bun run --filter='@bucket-db/*' build",
-    "dev": "bun run --filter='@bucket-db/core' dev"
+    "build": "bun run --filter='@hold-baby/bucket-db-*' build",
+    "dev": "bun run --filter='@hold-baby/bucket-db-core' dev"
   },
   "devDependencies": {
     "@types/bun": "latest",

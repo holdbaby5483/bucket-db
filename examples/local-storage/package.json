@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@bucket-db/core": "workspace:*"
+    "@hold-baby/bucket-db-core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"
