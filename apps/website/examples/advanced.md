@@ -9,8 +9,8 @@
 使用 ETag 防止并发更新冲突：
 
 ```typescript
-import { BucketDB, FileSystemAdapter, ConcurrentUpdateError } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter, ConcurrentUpdateError } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface Account extends Document {
   balance: number;

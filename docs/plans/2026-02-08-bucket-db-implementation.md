@@ -90,7 +90,7 @@ From design document roadmap:
   "scripts": {
     "test": "bun test",
     "build": "bun run --filter='@bucket-db/*' build",
-    "dev": "bun run --filter='@hold-baby/bucket-db-core' dev"
+    "dev": "bun run --filter='@hold-baby/bucket-db' dev"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -192,7 +192,7 @@ coverage/
 
 ```json
 {
-  "name": "@hold-baby/bucket-db-core",
+  "name": "@hold-baby/bucket-db",
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -246,7 +246,7 @@ Expected: Dependencies installed successfully
 **Step 10: Verify workspace setup**
 
 Run: `bun pm ls`
-Expected: Shows @hold-baby/bucket-db-core and @hold-baby/bucket-db-types workspaces
+Expected: Shows @hold-baby/bucket-db and @hold-baby/bucket-db-types workspaces
 
 **Step 11: Commit**
 
@@ -2441,14 +2441,14 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 ## Installation
 
 ```bash
-bun add @hold-baby/bucket-db-core
+bun add @hold-baby/bucket-db
 ```
 
 ## Quick Start
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
   name: string;
@@ -2489,7 +2489,7 @@ await users.delete(user.id);
 ## Using S3
 
 ```typescript
-import { BucketDB, S3Adapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -2506,7 +2506,7 @@ const db = new BucketDB(adapter, 'production');
 ## Using Alibaba Cloud OSS
 
 ```typescript
-import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',
@@ -2531,7 +2531,7 @@ const db = new BucketDB(adapter, 'production');
 
 ## Packages
 
-- `@hold-baby/bucket-db-core` - Core database engine
+- `@hold-baby/bucket-db` - Core database engine
 - `@hold-baby/bucket-db-types` - TypeScript type definitions
 
 ## Development
@@ -2555,7 +2555,7 @@ MIT
 **Step 2: Create packages/core/README.md**
 
 ```markdown
-# @hold-baby/bucket-db-core
+# @hold-baby/bucket-db
 
 Core database engine for BucketDB.
 
@@ -2605,7 +2605,7 @@ MIT
   "private": true,
   "type": "module",
   "dependencies": {
-    "@hold-baby/bucket-db-core": "workspace:*"
+    "@hold-baby/bucket-db": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest"
@@ -2616,8 +2616,8 @@ MIT
 **Step 4: Create examples/basic-usage/index.ts**
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
   name: string;

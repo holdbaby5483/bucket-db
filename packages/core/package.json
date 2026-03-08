@@ -1,5 +1,5 @@
 {
-  "name": "@hold-baby/bucket-db-core",
+  "name": "@hold-baby/bucket-db",
   "version": "0.2.0",
   "type": "module",
   "main": "./dist/index.js",

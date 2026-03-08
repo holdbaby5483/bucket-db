@@ -24,7 +24,7 @@ new BucketDB(
 
 **Example:**
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const db = new BucketDB(
   new FileSystemAdapter({ basePath: './data' }),

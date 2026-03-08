@@ -1,7 +1,7 @@
 # BucketDB
 
-[![npm version](https://img.shields.io/npm/v/@hold-baby/bucket-db-core.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db-core)
-[![npm downloads](https://img.shields.io/npm/dm/@hold-baby/bucket-db-core.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db-core)
+[![npm version](https://img.shields.io/npm/v/@hold-baby/bucket-db.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db)
+[![npm downloads](https://img.shields.io/npm/dm/@hold-baby/bucket-db.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
@@ -19,7 +19,7 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 ## Installation
 
 ```bash
-bun add @hold-baby/bucket-db-core
+bun add @hold-baby/bucket-db
 ```
 
 That's it! All types are included in the core package.
@@ -29,8 +29,8 @@ That's it! All types are included in the core package.
 ### Using Local File System (Development)
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
   name: string;
@@ -73,7 +73,7 @@ await users.delete(user.id);
 ### Using Memory Storage (Testing)
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
 
 // Create database with memory adapter (for testing)
 const adapter = new MemoryStorageAdapter();
@@ -83,7 +83,7 @@ const db = new BucketDB(adapter, 'my-app');
 ## Using S3
 
 ```typescript
-import { BucketDB, S3Adapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -100,7 +100,7 @@ const db = new BucketDB(adapter, 'production');
 ## Using Alibaba Cloud OSS
 
 ```typescript
-import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',
@@ -146,8 +146,8 @@ const db = new BucketDB(adapter, 'production');
 
 ## Packages
 
-- `@hold-baby/bucket-db-core` - Core database engine
-- `@hold-baby/bucket-db-core` - TypeScript type definitions
+- `@hold-baby/bucket-db` - Core database engine
+- `@hold-baby/bucket-db` - TypeScript type definitions
 
 ## Examples
 

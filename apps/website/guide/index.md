@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-bun add @hold-baby/bucket-db-core
+bun add @hold-baby/bucket-db
 ```
 
 详见[安装指南](./installation)了解更多安装方式。
@@ -15,7 +15,7 @@ bun add @hold-baby/bucket-db-core
 ### 1. 定义文档类型
 
 ```typescript
-import type { Document } from '@hold-baby/bucket-db-core';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
   name: string;
@@ -34,7 +34,7 @@ interface User extends Document {
 ### 2. 创建数据库实例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const db = new BucketDB(
   new FileSystemAdapter({ basePath: './my-database' }),
@@ -131,8 +131,8 @@ await users.delete(alice.id);
 ## 完整示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
   name: string;

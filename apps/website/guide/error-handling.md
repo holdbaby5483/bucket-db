@@ -13,7 +13,7 @@ import {
   ConcurrentUpdateError,
   ValidationError,
   StorageError
-} from '@hold-baby/bucket-db-core';
+} from '@hold-baby/bucket-db';
 ```
 
 ## DocumentNotFoundError
@@ -210,7 +210,7 @@ const user = await handleDBOperation(() =>
 ### 2. Express 中间件
 
 ```typescript
-import { BucketDBError } from '@hold-baby/bucket-db-core';
+import { BucketDBError } from '@hold-baby/bucket-db';
 import type { Request, Response, NextFunction } from 'express';
 
 function errorHandler(
@@ -361,7 +361,7 @@ try {
 ### 1. 启用详细日志
 
 ```typescript
-import { BucketDB, StorageError } from '@hold-baby/bucket-db-core';
+import { BucketDB, StorageError } from '@hold-baby/bucket-db';
 
 try {
   // 操作

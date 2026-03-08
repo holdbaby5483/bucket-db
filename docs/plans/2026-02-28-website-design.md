@@ -123,7 +123,7 @@ hero:
 
 **快速示例**：
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const db = new BucketDB(new FileSystemAdapter({ basePath: './data' }), 'my-app');
 const users = db.collection<User>('users');
@@ -142,7 +142,7 @@ const adults = await users.find({ age: { $gte: 18 } });
 
 **开始使用**：
 ```bash
-bun add @hold-baby/bucket-db-core
+bun add @hold-baby/bucket-db
 ```
 
 ---

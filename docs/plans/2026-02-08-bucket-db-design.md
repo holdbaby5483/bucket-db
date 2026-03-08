@@ -21,7 +21,7 @@
 - ✅ 3 个示例项目
 
 ### 📦 包结构
-- `@hold-baby/bucket-db-core` - 核心引擎（已实现）
+- `@hold-baby/bucket-db` - 核心引擎（已实现）
 - `@hold-baby/bucket-db-types` - 类型定义（已实现）
 
 ### 📝 待办事项
@@ -145,7 +145,7 @@ BucketDB 采用分层架构：
 ### 初始化
 
 ```typescript
-import { BucketDB } from '@hold-baby/bucket-db-core';
+import { BucketDB } from '@hold-baby/bucket-db';
 
 const db = new BucketDB({
   provider: 's3',              // 或 'oss'
@@ -420,7 +420,7 @@ const user = await users.findById('123');  // user: User | null
 ```
 bucket-db/
 ├── packages/
-│   ├── core/                       # 核心数据库引擎 (@hold-baby/bucket-db-core)
+│   ├── core/                       # 核心数据库引擎 (@hold-baby/bucket-db)
 │   │   ├── src/
 │   │   │   ├── index.ts
 │   │   │   ├── core/              # BucketDB, Collection
@@ -558,7 +558,7 @@ describe('Collection Integration', () => {
 
 ### 包命名
 
-- `@hold-baby/bucket-db-core` - 核心引擎
+- `@hold-baby/bucket-db` - 核心引擎
 - `@hold-baby/bucket-db-types` - 类型定义
 - `@bucket-db/client` - 客户端 SDK（未来）
 - `bucket-db-cli` - CLI 工具（未来）

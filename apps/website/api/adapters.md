@@ -12,7 +12,7 @@ new MemoryStorageAdapter()
 
 **Example:**
 ```typescript
-import { MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
+import { MemoryStorageAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new MemoryStorageAdapter();
 ```
@@ -40,7 +40,7 @@ new FileSystemAdapter(config: FileSystemAdapterConfig)
 
 **Example:**
 ```typescript
-import { FileSystemAdapter } from '@hold-baby/bucket-db-core';
+import { FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new FileSystemAdapter({
   basePath: './my-database',
@@ -82,7 +82,7 @@ new S3Adapter(config: StorageAdapterConfig)
 
 **Example:**
 ```typescript
-import { S3Adapter } from '@hold-baby/bucket-db-core';
+import { S3Adapter } from '@hold-baby/bucket-db';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -116,7 +116,7 @@ new OSSAdapter(config: StorageAdapterConfig)
 
 **Example:**
 ```typescript
-import { OSSAdapter } from '@hold-baby/bucket-db-core';
+import { OSSAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',

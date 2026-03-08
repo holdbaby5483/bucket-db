@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING**: Merged `@hold-baby/bucket-db-types` into `@hold-baby/bucket-db-core`
-  - All types are now exported directly from `@hold-baby/bucket-db-core`
+- **BREAKING**: Merged `@hold-baby/bucket-db-types` into `@hold-baby/bucket-db`
+  - All types are now exported directly from `@hold-baby/bucket-db`
   - No need to install `@hold-baby/bucket-db-types` separately
   - Simplified dependency tree and package management
 
@@ -20,15 +20,15 @@ If you were importing from both packages:
 
 ```typescript
 // Before (v0.1.0)
-import { BucketDB } from '@hold-baby/bucket-db-core';
+import { BucketDB } from '@hold-baby/bucket-db';
 import type { Document } from '@hold-baby/bucket-db-types';
 
 // After (v0.2.0)
-import { BucketDB } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 ```
 
-If you only used `@hold-baby/bucket-db-core`, no changes needed!
+If you only used `@hold-baby/bucket-db`, no changes needed!
 
 ### Removed
 

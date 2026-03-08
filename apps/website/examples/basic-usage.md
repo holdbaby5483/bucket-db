@@ -5,8 +5,8 @@
 ## 完整代码
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
 // 1. 定义文档类型
 interface User extends Document {

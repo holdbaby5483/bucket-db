@@ -13,14 +13,14 @@ BucketDB 完整的 API 文档。
 ## 安装
 
 ```bash
-bun add @hold-baby/bucket-db-core
+bun add @bucket-db/core
 ```
 
 ## 基础用法
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db-core';
-import type { Document } from '@hold-baby/bucket-db-core';
+import { BucketDB, FileSystemAdapter } from '@bucket-db/core';
+import type { Document } from '@bucket-db/core';
 
 interface User extends Document {
   name: string;
