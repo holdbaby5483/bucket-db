@@ -31,25 +31,17 @@ jobs:
 
       - name: Build packages
         run: |
-          cd packages/types && bun run build
-          cd ../core && bun run build
+          cd packages/core && bun run build
 
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Update package versions
+      - name: Update package version
         run: |
           VERSION=${{ steps.version.outputs.VERSION }}
-
-          # 更新 types 包版本
-          cd packages/types
+          cd packages/core
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-
-          # 更新 core 包版本（同时更新依赖的 types 版本）
-          cd ../core
-          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-          sed -i "s/@hold-baby\/bucket-db-types\": \"workspace:\*\"/@hold-baby\/bucket-db-types\": \"^$VERSION\"/" package.json
 
       - name: Verify npm token
         run: |
@@ -59,12 +51,6 @@ jobs:
           fi
           echo "✅ NPM_TOKEN is set (length: ${#NODE_AUTH_TOKEN})"
           echo "Token prefix: ${NODE_AUTH_TOKEN:0:4}..."
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish @hold-baby/bucket-db-types
-        working-directory: packages/types
-        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -84,7 +70,6 @@ jobs:
           body: |
             ## 📦 Published to npm
 
-            - `@hold-baby/bucket-db-types@${{ steps.version.outputs.VERSION }}`
             - `@hold-baby/bucket-db@${{ steps.version.outputs.VERSION }}`
 
             Install:
