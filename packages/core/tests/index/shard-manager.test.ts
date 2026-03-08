@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { ShardManager } from '../../src/index/shard-manager';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import type { IndexShard } from '@bucket-db/types';
+import type { IndexShard } from '../../src/index.js';
 
 describe('ShardManager', () => {
   let adapter: MemoryStorageAdapter;

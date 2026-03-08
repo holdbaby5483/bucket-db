@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
 import { FileSystemAdapter } from '../../src/storage/fs-adapter';
-import { StorageError } from '@bucket-db/types';
+import { StorageError } from '../../src/index.js';
 import { rmSync, existsSync } from 'fs';
 
 describe('FileSystemAdapter', () => {

@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Collection } from '../../src/core/collection';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import type { Document } from '@bucket-db/types';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '@bucket-db/types';
+import type { Document } from '../../src/index.js';
+import { DocumentNotFoundError, ConcurrentUpdateError } from '../../src/index.js';
 
 interface User extends Document {
   name: string;

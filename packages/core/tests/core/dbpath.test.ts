@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { BucketDB, MemoryStorageAdapter } from '../../src/index';
-import type { Document } from '@bucket-db/types';
+import type { Document } from '../../src/index.js';
 
 interface TestDoc extends Document {
   name: string;

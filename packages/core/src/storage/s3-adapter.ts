@@ -11,8 +11,8 @@ import type {
   StorageObject,
   PutOptions,
   StorageAdapterConfig,
-} from '@hold-baby/bucket-db-types';
-import { StorageError } from '@hold-baby/bucket-db-types';
+} from '../types/index.js';
+import { StorageError } from '../types/index.js';
 
 /**
  * S3 storage adapter

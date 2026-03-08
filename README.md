@@ -22,6 +22,8 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 bun add @hold-baby/bucket-db-core
 ```
 
+That's it! All types are included in the core package.
+
 ## Quick Start
 
 ### Using Local File System (Development)
@@ -145,7 +147,7 @@ const db = new BucketDB(adapter, 'production');
 ## Packages
 
 - `@hold-baby/bucket-db-core` - Core database engine
-- `@hold-baby/bucket-db-types` - TypeScript type definitions
+- `@hold-baby/bucket-db-core` - TypeScript type definitions
 
 ## Examples
 

@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { S3Adapter } from '../../src/storage/s3-adapter';
-import { StorageError } from '@bucket-db/types';
+import { StorageError } from '../../src/index.js';
 
 // Skip tests if no AWS credentials available
 const skipIfNoCredentials = process.env.AWS_ACCESS_KEY_ID ? test : test.skip;

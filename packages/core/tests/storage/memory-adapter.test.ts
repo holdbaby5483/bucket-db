@@ -1,6 +1,6 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import { StorageError } from '@bucket-db/types';
+import { StorageError } from '../../src/index.js';
 
 describe('MemoryStorageAdapter', () => {
   let adapter: MemoryStorageAdapter;

@@ -5,8 +5,8 @@ import type {
   StorageAdapter,
   StorageObject,
   PutOptions,
-} from '@hold-baby/bucket-db-types';
-import { StorageError } from '@hold-baby/bucket-db-types';
+} from '../types/index.js';
+import { StorageError } from '../types/index.js';
 
 export interface FileSystemAdapterConfig {
   basePath: string;

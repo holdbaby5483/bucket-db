@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { Collection } from '../../src/core/collection';
 import { MemoryStorageAdapter } from '../../src/storage/memory-adapter';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '@bucket-db/types';
+import { DocumentNotFoundError, ConcurrentUpdateError } from '../../src/index.js';
 describe('Collection', () => {
     let adapter;
     let collection;

@@ -1,5 +1,5 @@
-import type { StorageAdapter, IndexShard, QueryFilter } from '@hold-baby/bucket-db-types';
-import { StorageError } from '@hold-baby/bucket-db-types';
+import type { StorageAdapter, IndexShard, QueryFilter } from '../types/index.js';
+import { StorageError } from '../types/index.js';
 import { getShardId, formatShardId } from '../utils/hash.js';
 import { evaluateFilter } from '../query/evaluator.js';
 

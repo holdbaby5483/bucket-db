@@ -1,4 +1,4 @@
-import type { StorageAdapter, Document } from '@hold-baby/bucket-db-types';
+import type { StorageAdapter, Document } from '../types/index.js';
 import { Collection, CollectionOptions } from './collection.js';
 
 export interface BucketDBOptions {
