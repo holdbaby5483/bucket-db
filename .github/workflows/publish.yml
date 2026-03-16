@@ -54,7 +54,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Publish bucket-db
+      - name: Publish @hold-baby/bucket-db
         working-directory: packages/core
         run: npm publish --access public
         env:
@@ -70,11 +70,11 @@ jobs:
           body: |
             ## 📦 Published to npm
 
-            - `bucket-db@${{ steps.version.outputs.VERSION }}`
+            - `@hold-baby/bucket-db@${{ steps.version.outputs.VERSION }}`
 
             Install:
             ```bash
-            bun add bucket-db
+            bun add @hold-baby/bucket-db
             ```
           draft: false
           prerelease: false

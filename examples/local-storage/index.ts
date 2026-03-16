@@ -1,5 +1,5 @@
-import { BucketDB, FileSystemAdapter } from 'bucket-db';
-import type { Document } from 'bucket-db';
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 import { existsSync, rmSync } from 'fs';
 
 interface User extends Document {
