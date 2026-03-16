@@ -38,6 +38,12 @@ export default defineConfig({
             { text: '查询语法', link: '/guide/queries' },
             { text: '错误处理', link: '/guide/error-handling' }
           ]
+        },
+        {
+          text: '集成',
+          items: [
+            { text: 'MCP 集成', link: '/guide/mcp' }
+          ]
         }
       ],
 
