@@ -1,38 +1,142 @@
-# @bucket-db/core
+# BucketDB
 
-Core database engine for BucketDB.
+[![npm version](https://img.shields.io/npm/v/@hold-baby/bucket-db.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db)
+[![npm downloads](https://img.shields.io/npm/dm/@hold-baby/bucket-db.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-See the [main README](../../README.md) for usage and documentation.
+A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
 
-## API
+## Features
 
-### BucketDB
+- 🚀 Use cloud object storage or local files as backend - no database servers needed
+- 📦 Type-safe TypeScript API with full type inference
+- 🔍 Flexible document queries (equality and comparison operators)
+- 🔒 Optimistic locking via ETag for concurrency control
+- ☁️ Support for AWS S3, Alibaba Cloud OSS, and local file system with unified API
+- 🎯 Collections organize documents with independent indexes
+- 📊 Sharded index design scales to hundreds of thousands of documents
 
-Main database class.
+## Installation
 
-```typescript
-const db = new BucketDB(adapter, dbPath, options);
+```bash
+bun add @hold-baby/bucket-db
 ```
 
-### Collection
+That's it! All types are included in the core package.
 
-Type-safe collection interface.
+## Quick Start
+
+### Using Local File System (Development)
 
 ```typescript
-const collection = db.collection<T>(name);
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
-await collection.insert(data);
-await collection.findById(id);
-await collection.find(filter, options);
-await collection.update(id, data, options);
-await collection.delete(id);
+interface User extends Document {
+  name: string;
+  age: number;
+  email: string;
+  status: 'active' | 'inactive';
+}
+
+// Create database with local file system adapter
+const adapter = new FileSystemAdapter({
+  basePath: './my-database',
+});
+const db = new BucketDB(adapter, 'my-app');
+
+// Get collection
+const users = db.collection<User>('users');
+
+// Insert document
+const user = await users.insert({
+  name: 'Alice',
+  age: 25,
+  email: 'alice@example.com',
+  status: 'active',
+});
+
+// Find by ID
+const found = await users.findById(user.id);
+
+// Query documents
+const activeUsers = await users.find({ status: 'active' });
+const adults = await users.find({ age: { $gte: 18 } });
+
+// Update with optimistic locking
+const updated = await users.update(user.id, { age: 26 }, { etag: user._etag });
+
+// Delete
+await users.delete(user.id);
 ```
 
-### Storage Adapters
+### Using Memory Storage (Testing)
 
-- `MemoryStorageAdapter` - In-memory storage for testing
-- `S3Adapter` - AWS S3 storage
-- `OSSAdapter` - Alibaba Cloud OSS storage
+```typescript
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+
+// Create database with memory adapter (for testing)
+const adapter = new MemoryStorageAdapter();
+const db = new BucketDB(adapter, 'my-app');
+```
+
+## Using S3
+
+```typescript
+import { BucketDB, S3Adapter } from '@hold-baby/bucket-db';
+
+const adapter = new S3Adapter({
+  bucket: 'my-bucket',
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const db = new BucketDB(adapter, 'production');
+```
+
+## Using Alibaba Cloud OSS
+
+```typescript
+import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db';
+
+const adapter = new OSSAdapter({
+  bucket: 'my-bucket',
+  region: 'oss-cn-hangzhou',
+  credentials: {
+    accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.OSS_ACCESS_KEY_SECRET!,
+  },
+});
+
+const db = new BucketDB(adapter, 'production');
+```
+
+## Query Operators
+
+- `$eq` - Equal (default)
+- `$ne` - Not equal
+- `$gt`, `$gte` - Greater than, greater than or equal
+- `$lt`, `$lte` - Less than, less than or equal
+- `$in` - In array
+- `$nin` - Not in array
+
+## Storage Adapters
+
+- **FileSystemAdapter** - Local file system storage (great for development)
+- **MemoryStorageAdapter** - In-memory storage (for testing)
+- **S3Adapter** - AWS S3 storage (for production)
+- **OSSAdapter** - Alibaba Cloud OSS storage (for production)
+
+## Documentation
+
+📚 **官方网站**: https://bucket-db.vercel.app
+
+- [快速开始](https://bucket-db.vercel.app/guide/) - 5 分钟上手教程
+- [API 参考](https://bucket-db.vercel.app/api/) - 完整的 API 文档
+- [示例](https://bucket-db.vercel.app/examples/) - 实际使用示例
 
 ## License
 
