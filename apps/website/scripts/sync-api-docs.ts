@@ -38,6 +38,14 @@ generateAdaptersPage(sections);
 generateTypesPage(sections);
 generateErrorsPage(sections);
 
+// 同步 llms.txt 到 public 目录
+const LLMS_SOURCE = join(process.cwd(), '../../packages/core/llms.txt');
+const LLMS_TARGET = join(process.cwd(), 'public/llms.txt');
+if (existsSync(LLMS_SOURCE)) {
+  writeFileSync(LLMS_TARGET, readFileSync(LLMS_SOURCE, 'utf-8'));
+  console.log('  ✓ public/llms.txt');
+}
+
 console.log('✅ API 文档同步完成');
 
 /**
