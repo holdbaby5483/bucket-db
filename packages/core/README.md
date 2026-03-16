@@ -4,29 +4,76 @@
 [![npm downloads](https://img.shields.io/npm/dm/@hold-baby/bucket-db.svg)](https://www.npmjs.com/package/@hold-baby/bucket-db)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
-
-## Features
-
-- 🚀 Use cloud object storage or local files as backend - no database servers needed
-- 📦 Type-safe TypeScript API with full type inference
-- 🔍 Flexible document queries (equality and comparison operators)
-- 🔒 Optimistic locking via ETag for concurrency control
-- ☁️ Support for AWS S3, Alibaba Cloud OSS, and local file system with unified API
-- 🎯 Collections organize documents with independent indexes
-- 📊 Sharded index design scales to hundreds of thousands of documents
+A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system. No database servers needed.
 
 ## Installation
 
 ```bash
 bun add @hold-baby/bucket-db
+# or
+npm install @hold-baby/bucket-db
 ```
 
-That's it! All types are included in the core package.
+## Exports
+
+```typescript
+// Core classes
+import { BucketDB, Collection } from '@hold-baby/bucket-db';
+
+// Storage adapters
+import {
+  MemoryStorageAdapter,  // in-memory (testing)
+  FileSystemAdapter,     // local file system (development)
+  S3Adapter,             // AWS S3 (production)
+  OSSAdapter,            // Alibaba Cloud OSS (production)
+} from '@hold-baby/bucket-db';
+
+// Types
+import type {
+  Document,
+  InsertDocument,
+  UpdateDocument,
+  QueryFilter,
+  QueryOptions,
+  UpdateOptions,
+  StorageAdapter,
+} from '@hold-baby/bucket-db';
+
+// Error classes
+import {
+  BucketDBError,
+  DocumentNotFoundError,
+  ConcurrentUpdateError,
+  ValidationError,
+  StorageError,
+} from '@hold-baby/bucket-db';
+```
+
+## Document Type
+
+Every document stored in BucketDB has these system fields:
+
+```typescript
+interface Document {
+  id: string;         // auto-generated UUID
+  _etag?: string;     // version tag for optimistic locking
+  _createdAt?: string; // ISO 8601 timestamp
+  _updatedAt?: string; // ISO 8601 timestamp
+}
+
+// Extend Document to define your own schema
+interface User extends Document {
+  name: string;
+  age: number;
+  email: string;
+}
+```
+
+`InsertDocument<T>` omits `id`, `_etag`, `_createdAt`, `_updatedAt` — pass only your fields when inserting.
+
+`UpdateDocument<T>` is `Partial<Omit<T, 'id'>>` — all fields optional except `id` is excluded.
 
 ## Quick Start
-
-### Using Local File System (Development)
 
 ```typescript
 import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
@@ -39,51 +86,108 @@ interface User extends Document {
   status: 'active' | 'inactive';
 }
 
-// Create database with local file system adapter
-const adapter = new FileSystemAdapter({
-  basePath: './my-database',
-});
-const db = new BucketDB(adapter, 'my-app');
+const db = new BucketDB(
+  new FileSystemAdapter({ basePath: './data' }),
+  'my-app'
+);
 
-// Get collection
 const users = db.collection<User>('users');
 
-// Insert document
-const user = await users.insert({
-  name: 'Alice',
-  age: 25,
-  email: 'alice@example.com',
-  status: 'active',
-});
+// Insert
+const user = await users.insert({ name: 'Alice', age: 25, email: 'alice@example.com', status: 'active' });
+// user.id, user._etag, user._createdAt are set automatically
 
 // Find by ID
 const found = await users.findById(user.id);
 
-// Query documents
+// Query
 const activeUsers = await users.find({ status: 'active' });
-const adults = await users.find({ age: { $gte: 18 } });
+const adults = await users.find({ age: { $gte: 18 } }, { limit: 10, offset: 0 });
 
-// Update with optimistic locking
+// Update (with optimistic locking via etag)
 const updated = await users.update(user.id, { age: 26 }, { etag: user._etag });
 
 // Delete
 await users.delete(user.id);
 ```
 
-### Using Memory Storage (Testing)
+## Query Operators
+
+```typescript
+// Equality (shorthand)
+await users.find({ status: 'active' });           // { status: { $eq: 'active' } }
+
+// Comparison
+await users.find({ age: { $gt: 18 } });
+await users.find({ age: { $gte: 18 } });
+await users.find({ age: { $lt: 65 } });
+await users.find({ age: { $lte: 65 } });
+await users.find({ status: { $ne: 'inactive' } });
+
+// Array membership
+await users.find({ status: { $in: ['active', 'pending'] } });
+await users.find({ status: { $nin: ['banned', 'deleted'] } });
+
+// Pagination
+await users.find({}, { limit: 20, offset: 40 });
+```
+
+## Error Handling
+
+```typescript
+import {
+  DocumentNotFoundError,
+  ConcurrentUpdateError,
+  ValidationError,
+  StorageError,
+} from '@hold-baby/bucket-db';
+
+try {
+  const user = await users.findById('nonexistent-id');
+} catch (err) {
+  if (err instanceof DocumentNotFoundError) {
+    // Document does not exist
+  }
+}
+
+try {
+  await users.update(id, { age: 30 }, { etag: staleEtag });
+} catch (err) {
+  if (err instanceof ConcurrentUpdateError) {
+    // Another write happened — re-fetch and retry
+  }
+}
+```
+
+| Error class | When thrown |
+|---|---|
+| `DocumentNotFoundError` | `findById` or `update`/`delete` on a missing document |
+| `ConcurrentUpdateError` | `update`/`delete` with a stale `etag` |
+| `ValidationError` | Invalid input (e.g. missing required fields) |
+| `StorageError` | Underlying storage failure (S3, OSS, filesystem I/O) |
+
+## Storage Adapters
+
+### MemoryStorageAdapter (Testing)
 
 ```typescript
 import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
 
-// Create database with memory adapter (for testing)
-const adapter = new MemoryStorageAdapter();
-const db = new BucketDB(adapter, 'my-app');
+const db = new BucketDB(new MemoryStorageAdapter(), 'test-db');
 ```
 
-## Using S3
+### FileSystemAdapter (Development)
 
 ```typescript
-import { BucketDB, S3Adapter } from '@hold-baby/bucket-db';
+import { FileSystemAdapter } from '@hold-baby/bucket-db';
+
+const adapter = new FileSystemAdapter({ basePath: './data' });
+```
+
+### S3Adapter (Production)
+
+```typescript
+import { S3Adapter } from '@hold-baby/bucket-db';
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -93,14 +197,12 @@ const adapter = new S3Adapter({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
 });
-
-const db = new BucketDB(adapter, 'production');
 ```
 
-## Using Alibaba Cloud OSS
+### OSSAdapter (Production)
 
 ```typescript
-import { BucketDB, OSSAdapter } from '@hold-baby/bucket-db';
+import { OSSAdapter } from '@hold-baby/bucket-db';
 
 const adapter = new OSSAdapter({
   bucket: 'my-bucket',
@@ -110,33 +212,42 @@ const adapter = new OSSAdapter({
     secretAccessKey: process.env.OSS_ACCESS_KEY_SECRET!,
   },
 });
-
-const db = new BucketDB(adapter, 'production');
 ```
 
-## Query Operators
+## BucketDB Options
 
-- `$eq` - Equal (default)
-- `$ne` - Not equal
-- `$gt`, `$gte` - Greater than, greater than or equal
-- `$lt`, `$lte` - Less than, less than or equal
-- `$in` - In array
-- `$nin` - Not in array
+```typescript
+new BucketDB(adapter, dbPath, options?)
+```
 
-## Storage Adapters
+| Parameter | Type | Description |
+|---|---|---|
+| `adapter` | `StorageAdapter` | Storage backend |
+| `dbPath` | `string` | Namespace for this database (e.g. `'my-app'`, `'tenant-123'`) |
+| `options.defaultShardCount` | `number` | Default index shard count (default: `16`) |
 
-- **FileSystemAdapter** - Local file system storage (great for development)
-- **MemoryStorageAdapter** - In-memory storage (for testing)
-- **S3Adapter** - AWS S3 storage (for production)
-- **OSSAdapter** - Alibaba Cloud OSS storage (for production)
+## Collection Options
+
+```typescript
+db.collection<T>(name, options?)
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `name` | `string` | Collection name |
+| `options.shardCount` | `number` | Override shard count for this collection |
+
+## Features
+
+- No database servers — uses S3 / OSS / local filesystem as backend
+- Type-safe TypeScript API with full inference
+- Optimistic locking via ETag
+- Sharded index design for scale
+- Unified API across all storage backends
 
 ## Documentation
 
-📚 **官方网站**: https://bucket-db.vercel.app
-
-- [快速开始](https://bucket-db.vercel.app/guide/) - 5 分钟上手教程
-- [API 参考](https://bucket-db.vercel.app/api/) - 完整的 API 文档
-- [示例](https://bucket-db.vercel.app/examples/) - 实际使用示例
+📚 https://bucket-db.vercel.app
 
 ## License
 
