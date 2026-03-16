@@ -24,6 +24,7 @@ export type {
   ICollection,
   CollectionMeta,
   IndexShard,
+  ShardMetadata,
 } from './collection.js';
 
 // Error classes

@@ -8,7 +8,7 @@ import type {
 import { StorageError } from '../types/index.js';
 
 /**
- * Alibaba Cloud OSS storage adapter
+ * Alibaba Cloud OSS storage adapter with retry logic and timeout configuration
  */
 export class OSSAdapter implements StorageAdapter {
   private client: OSS;
@@ -25,25 +25,66 @@ export class OSSAdapter implements StorageAdapter {
     });
   }
 
-  async get(key: string): Promise<StorageObject> {
-    try {
-      const result = await this.client.get(key);
+  /**
+   * Check if an error is retryable (temporary network issue or rate limit)
+   */
+  private isRetryableError(error: any): boolean {
+    // OSS error codes for retryable errors
+    const retryableCodes = ['RequestTimeout', 'ServiceUnavailable', 'Throttling', 'RequestTimeTooSkewed'];
+    const retryableStatusCodes = [429, 500, 502, 503, 504];
 
-      return {
-        data: JSON.parse(result.content.toString()),
-        etag: result.res.headers.etag?.replace(/"/g, '') || '',
-        lastModified: new Date(result.res.headers['last-modified']),
-      };
-    } catch (error: any) {
-      if (error.code === 'NoSuchKey') {
-        throw new StorageError(`Object not found: ${key}`);
+    return (
+      retryableCodes.includes(error.code) ||
+      retryableStatusCodes.includes(error.status) ||
+      error.code === 'ETIMEDOUT' ||
+      error.code === 'ECONNRESET'
+    );
+  }
+
+  /**
+   * Retry wrapper with exponential backoff
+   */
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error: any) {
+        if (this.isRetryableError(error) && attempt < maxRetries - 1) {
+          // Exponential backoff with jitter: 100ms * 2^attempt + random(0-50ms)
+          const baseDelay = 100 * Math.pow(2, attempt);
+          const jitter = Math.random() * 50;
+          await new Promise(resolve => setTimeout(resolve, baseDelay + jitter));
+          continue;
+        }
+        throw error;
       }
-      throw new StorageError(`Failed to get object: ${error.message}`, error);
     }
+    throw new Error('Unreachable');
+  }
+
+  async get(key: string): Promise<StorageObject> {
+    return this.withRetry(async () => {
+      try {
+        const result = await this.client.get(key);
+
+        return {
+          data: JSON.parse(result.content.toString()),
+          etag: result.res.headers.etag?.replace(/"/g, '') || '',
+          lastModified: new Date(result.res.headers['last-modified']),
+        };
+      } catch (error: any) {
+        if (error.code === 'NoSuchKey') {
+          throw new StorageError(`Object not found: ${key}`);
+        }
+        throw new StorageError(`Failed to get object: ${error.message}`, error);
+      }
+    });
   }
 
   async put(key: string, data: any, options?: PutOptions): Promise<{ etag: string }> {
-    try {
+    return this.withRetry(async () => {
+      try {
       const headers: Record<string, string> = {};
 
       if (options?.ifMatch) {
@@ -60,12 +101,13 @@ export class OSSAdapter implements StorageAdapter {
       return {
         etag: result.res.headers.etag?.replace(/"/g, '') || '',
       };
-    } catch (error: any) {
+      } catch (error: any) {
       if (error.code === 'PreconditionFailed') {
         throw new StorageError('PreconditionFailed: ETag mismatch');
       }
       throw new StorageError(`Failed to put object: ${error.message}`, error);
     }
+      });
   }
 
   async delete(key: string): Promise<void> {

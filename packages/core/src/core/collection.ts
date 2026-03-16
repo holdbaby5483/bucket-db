@@ -10,6 +10,9 @@ import type {
 } from '../types/index.js';
 import { DocumentNotFoundError, ConcurrentUpdateError } from '../types/index.js';
 import { ShardManager } from '../index/shard-manager.js';
+import { sanitizePathComponent, safePathJoin } from '../utils/path-validator.js';
+import { WAL, type WALEntry } from './wal.js';
+import { LRUCache } from '../cache/lru-cache.js';
 
 /**
  * Generate UUID v4
@@ -34,24 +37,59 @@ export interface CollectionOptions {
  */
 export class Collection<T extends Document> implements ICollection<T> {
   private shardManager: ShardManager;
+  private wal: WAL;
+  private queryCache: LRUCache<T[]>;
   private basePath: string;
 
   constructor(
     private adapter: StorageAdapter,
-    private dbPath: string,
-    private collectionName: string,
+    dbPath: string,
+    collectionName: string,
     options: CollectionOptions = {}
   ) {
-    this.basePath = `${dbPath}/${collectionName}`;
+    // Validate collection name to prevent path traversal
+    const sanitizedCollectionName = sanitizePathComponent(collectionName);
+    this.basePath = safePathJoin(dbPath, sanitizedCollectionName);
     this.shardManager = new ShardManager(
       adapter,
       this.basePath,
       options.shardCount || 16
     );
+    this.wal = new WAL(adapter, this.basePath);
+    this.queryCache = new LRUCache<T[]>(100, 5 * 60 * 1000); // 100 entries, 5 min TTL
+
+    // Recover from any pending WAL entries
+    this.recoverFromWAL().catch(err => {
+      console.error('WAL recovery failed:', err);
+    });
+  }
+
+  /**
+   * Recover from pending WAL entries
+   */
+  private async recoverFromWAL(): Promise<void> {
+    await this.wal.recover(async (entry: WALEntry) => {
+      // Replay the operation based on WAL entry
+      switch (entry.operation) {
+        case 'insert':
+        case 'update':
+          // Ensure document is indexed
+          if (entry.documentData) {
+            await this.shardManager.addDocument(entry.documentData);
+          }
+          break;
+        case 'delete':
+          // Ensure document is removed from index
+          await this.shardManager.removeDocument(entry.documentId);
+          break;
+      }
+    });
   }
 
   private getDocPath(id: string): string {
-    return `${this.basePath}/docs/${id}.json`;
+    // Validate document ID to prevent path traversal
+    const sanitizedId = sanitizePathComponent(id);
+    return safePathJoin(this.basePath, 'docs', `${sanitizedId}.json`);
   }
 
   async insert(data: InsertDocument<T>): Promise<T> {
@@ -65,15 +103,34 @@ export class Collection<T extends Document> implements ICollection<T> {
       _updatedAt: timestamp,
     } as T;
 
-    // Write document to storage
-    const { etag } = await this.adapter.put(this.getDocPath(id), document);
+    // 1. Log operation to WAL first
+    await this.wal.log({
+      operation: 'insert',
+      collectionPath: this.basePath,
+      documentId: id,
+      documentData: document,
+      timestamp,
+    });
 
-    document._etag = etag;
+    try {
+      // 2. Write document to storage
+      const { etag } = await this.adapter.put(this.getDocPath(id), document);
+      document._etag = etag;
 
-    // Add to index
-    await this.shardManager.addDocument(document);
+      // 3. Add to index
+      await this.shardManager.addDocument(document);
 
-    return document;
+      // 4. Clear WAL entry after successful completion
+      await this.wal.clear(id);
+
+      // 5. Invalidate query cache (new document may match existing queries)
+      this.queryCache.invalidate();
+
+      return document;
+    } catch (error) {
+      // On failure, WAL entry remains for recovery
+      throw error;
+    }
   }
 
   async findById(id: string): Promise<T | null> {
@@ -88,32 +145,43 @@ export class Collection<T extends Document> implements ICollection<T> {
   }
 
   async find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]> {
+    // Check cache first
+    const cacheKey = LRUCache.generateKey(filter as Record<string, any>, options as Record<string, any>);
+    const cached = this.queryCache.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     // Query index to get matching document IDs
     const indexResults = await this.shardManager.query(filter);
 
     // Get full documents
-    const ids = indexResults.map(doc => doc.id);
+    let ids = indexResults.map(doc => doc.id);
 
     if (ids.length === 0) {
       return [];
     }
 
-    // Batch get documents
+    // Apply pagination on IDs before loading documents (PERF optimization)
+    if (options?.offset) {
+      ids = ids.slice(options.offset);
+    }
+    if (options?.limit) {
+      ids = ids.slice(0, options.limit);
+    }
+
+    // Batch get only the required documents
     const docMap = await this.adapter.batchGet(ids.map(id => this.getDocPath(id)));
 
-    let results = Array.from(docMap.values()).map(obj => {
+    // Convert to array and add etags
+    const results = Array.from(docMap.values()).map(obj => {
       const doc = obj.data as T;
       doc._etag = obj.etag;
       return doc;
     });
 
-    // Apply pagination
-    if (options?.offset) {
-      results = results.slice(options.offset);
-    }
-    if (options?.limit) {
-      results = results.slice(0, options.limit);
-    }
+    // Cache the results
+    this.queryCache.set(cacheKey, results);
 
     return results;
   }
@@ -142,19 +210,38 @@ export class Collection<T extends Document> implements ICollection<T> {
       _updatedAt: now(),
     } as T;
 
-    // Write document
-    const { etag } = await this.adapter.put(
-      this.getDocPath(id),
-      updated,
-      current._etag ? { ifMatch: current._etag } : undefined
-    );
+    // 1. Log operation to WAL first
+    await this.wal.log({
+      operation: 'update',
+      collectionPath: this.basePath,
+      documentId: id,
+      documentData: updated,
+      timestamp: now(),
+    });
 
-    updated._etag = etag;
+    try {
+      // 2. Write document
+      const { etag } = await this.adapter.put(
+        this.getDocPath(id),
+        updated,
+        current._etag ? { ifMatch: current._etag } : undefined
+      );
 
-    // Update index
-    await this.shardManager.updateDocument(updated);
+      updated._etag = etag;
 
-    return updated;
+      // 3. Update index
+      await this.shardManager.updateDocument(updated);
+
+      // 4. Clear WAL entry
+      await this.wal.clear(id);
+
+      // 5. Invalidate query cache (document changed)
+      this.queryCache.invalidate();
+
+      return updated;
+    } catch (error) {
+      throw error;
+    }
   }
 
   async delete(id: string): Promise<void> {
@@ -164,10 +251,28 @@ export class Collection<T extends Document> implements ICollection<T> {
       throw new DocumentNotFoundError(id);
     }
 
-    // Delete from storage
-    await this.adapter.delete(this.getDocPath(id));
+    // 1. Log operation to WAL first
+    await this.wal.log({
+      operation: 'delete',
+      collectionPath: this.basePath,
+      documentId: id,
+      timestamp: now(),
+    });
 
-    // Remove from index
-    await this.shardManager.removeDocument(id);
+    try {
+      // 2. Delete from storage
+      await this.adapter.delete(this.getDocPath(id));
+
+      // 3. Remove from index
+      await this.shardManager.removeDocument(id);
+
+      // 4. Clear WAL entry
+      await this.wal.clear(id);
+
+      // 5. Invalidate query cache (document deleted)
+      this.queryCache.invalidate();
+    } catch (error) {
+      throw error;
+    }
   }
 }

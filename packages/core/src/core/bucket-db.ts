@@ -1,5 +1,6 @@
 import type { StorageAdapter, Document } from '../types/index.js';
 import { Collection, CollectionOptions } from './collection.js';
+import { sanitizePathComponent } from '../utils/path-validator.js';
 
 export interface BucketDBOptions {
   defaultShardCount?: number;
@@ -24,6 +25,9 @@ export class BucketDB {
     name: string,
     options?: CollectionOptions
   ): Collection<T> {
+    // Validate collection name to prevent path traversal
+    sanitizePathComponent(name);
+
     if (this.collections.has(name)) {
       return this.collections.get(name)!;
     }

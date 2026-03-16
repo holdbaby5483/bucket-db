@@ -32,3 +32,12 @@ export interface IndexShard {
   shardId: string;
   documents: Record<string, any>;
 }
+
+/**
+ * Shard metadata for performance optimization
+ */
+export interface ShardMetadata {
+  shardId: string;
+  docCount: number;
+  lastUpdated: string;
+}

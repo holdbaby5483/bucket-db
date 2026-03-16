@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, statSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync, statSync, readdirSync, renameSync } from 'fs';
 import { join, dirname, relative } from 'path';
 import { createHash } from 'crypto';
 import type {
@@ -7,6 +7,7 @@ import type {
   PutOptions,
 } from '../types/index.js';
 import { StorageError } from '../types/index.js';
+import { safeKeyPath, validatePathWithinBase } from '../utils/path-validator.js';
 
 export interface FileSystemAdapterConfig {
   basePath: string;
@@ -33,11 +34,11 @@ export class FileSystemAdapter implements StorageAdapter {
   }
 
   private getFilePath(key: string): string {
-    return join(this.basePath, key);
+    return safeKeyPath(this.basePath, key);
   }
 
   private getMetadataPath(key: string): string {
-    return join(this.basePath, key + '.meta');
+    return safeKeyPath(this.basePath, key + '.meta');
   }
 
   private generateETag(data: any): string {
@@ -116,14 +117,32 @@ export class FileSystemAdapter implements StorageAdapter {
       // Generate ETag
       const etag = this.generateETag(data);
 
-      // Write data file
-      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      // Use temporary files for atomic writes
+      const tmpFilePath = filePath + '.tmp';
+      const tmpMetaPath = metaPath + '.tmp';
 
-      // Write metadata file
-      const metadata: FileMetadata = { etag, data };
-      writeFileSync(metaPath, JSON.stringify(metadata), 'utf-8');
+      try {
+        // Write to temporary files first
+        writeFileSync(tmpFilePath, JSON.stringify(data, null, 2), 'utf-8');
 
-      return { etag };
+        const metadata: FileMetadata = { etag, data };
+        writeFileSync(tmpMetaPath, JSON.stringify(metadata), 'utf-8');
+
+        // Atomic rename - both files become visible together
+        renameSync(tmpFilePath, filePath);
+        renameSync(tmpMetaPath, metaPath);
+
+        return { etag };
+      } catch (writeError: any) {
+        // Clean up temporary files on failure
+        try {
+          if (existsSync(tmpFilePath)) unlinkSync(tmpFilePath);
+          if (existsSync(tmpMetaPath)) unlinkSync(tmpMetaPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+        throw writeError;
+      }
     } catch (error: any) {
       if (error instanceof StorageError) {
         throw error;
@@ -156,6 +175,13 @@ export class FileSystemAdapter implements StorageAdapter {
   async listKeys(prefix: string): Promise<string[]> {
     const keys: string[] = [];
     const prefixPath = join(this.basePath, prefix);
+
+    // Validate that prefix path doesn't escape base directory
+    try {
+      validatePathWithinBase(this.basePath, prefixPath);
+    } catch (error) {
+      throw new StorageError(`Invalid prefix path: ${(error as Error).message}`);
+    }
 
     try {
       const walk = (dir: string): void => {

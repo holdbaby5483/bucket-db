@@ -1,6 +1,6 @@
 {
-  "name": "@hold-baby/bucket-db",
-  "version": "0.2.0",
+  "name": "bucket-db",
+  "version": "0.3.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

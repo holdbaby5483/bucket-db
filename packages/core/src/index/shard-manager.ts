@@ -1,4 +1,4 @@
-import type { StorageAdapter, IndexShard, QueryFilter } from '../types/index.js';
+import type { StorageAdapter, IndexShard, QueryFilter, ShardMetadata } from '../types/index.js';
 import { StorageError } from '../types/index.js';
 import { getShardId, formatShardId } from '../utils/hash.js';
 import { evaluateFilter } from '../query/evaluator.js';
@@ -17,23 +17,51 @@ export class ShardManager {
     return `${this.collectionPath}/index/shard-${formatShardId(shardId)}.json`;
   }
 
-  private async readShard(shardId: number): Promise<IndexShard> {
-    const path = this.getShardPath(shardId);
+  private getShardMetadataPath(shardId: number): string {
+    return `${this.collectionPath}/index/shard-${formatShardId(shardId)}.meta.json`;
+  }
+
+  private async readShardMetadata(shardId: number): Promise<ShardMetadata | null> {
+    const path = this.getShardMetadataPath(shardId);
     try {
       const { data } = await this.adapter.get(path);
-      return data as IndexShard;
+      return data as ShardMetadata;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private async readShard(shardId: number): Promise<{ shard: IndexShard; etag?: string }> {
+    const path = this.getShardPath(shardId);
+    try {
+      const { data, etag } = await this.adapter.get(path);
+      return { shard: data as IndexShard, etag };
     } catch (error) {
       // Return empty shard if not found
       return {
-        shardId: formatShardId(shardId),
-        documents: {},
+        shard: {
+          shardId: formatShardId(shardId),
+          documents: {},
+        },
+        etag: undefined,
       };
     }
   }
 
   private async writeShard(shardId: number, shard: IndexShard, etag?: string): Promise<void> {
     const path = this.getShardPath(shardId);
+    const metaPath = this.getShardMetadataPath(shardId);
+
+    // Write shard data
     await this.adapter.put(path, shard, etag ? { ifMatch: etag } : undefined);
+
+    // Write metadata
+    const metadata: ShardMetadata = {
+      shardId: formatShardId(shardId),
+      docCount: Object.keys(shard.documents).length,
+      lastUpdated: new Date().toISOString(),
+    };
+    await this.adapter.put(metaPath, metadata);
   }
 
   /**
@@ -43,24 +71,26 @@ export class ShardManager {
     const docId = doc.id;
     const shardId = getShardId(docId, this.shardCount);
 
-    // Retry logic for optimistic locking
-    let retries = 3;
-    while (retries > 0) {
+    // Retry logic for optimistic locking with exponential backoff
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const shard = await this.readShard(shardId);
-        const currentEtag = shard.documents[docId] ?
-          (await this.adapter.get(this.getShardPath(shardId))).etag :
-          undefined;
+        // Read shard and etag in a single operation
+        const { shard, etag } = await this.readShard(shardId);
 
         shard.documents[docId] = { ...doc };
 
-        await this.writeShard(shardId, shard, currentEtag);
+        await this.writeShard(shardId, shard, etag);
         return;
       } catch (error) {
         if (error instanceof StorageError && error.message.includes('PreconditionFailed')) {
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries)));
-          continue;
+          if (attempt < maxRetries - 1) {
+            // Exponential backoff with jitter: 100ms * 2^attempt + random(0-50ms)
+            const baseDelay = 100 * Math.pow(2, attempt);
+            const jitter = Math.random() * 50;
+            await new Promise(resolve => setTimeout(resolve, baseDelay + jitter));
+            continue;
+          }
         }
         throw error;
       }
@@ -81,11 +111,11 @@ export class ShardManager {
   async removeDocument(docId: string): Promise<void> {
     const shardId = getShardId(docId, this.shardCount);
 
-    let retries = 3;
-    while (retries > 0) {
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const { etag } = await this.adapter.get(this.getShardPath(shardId));
-        const shard = await this.readShard(shardId);
+        // Read shard and etag in a single operation
+        const { shard, etag } = await this.readShard(shardId);
 
         delete shard.documents[docId];
 
@@ -93,9 +123,13 @@ export class ShardManager {
         return;
       } catch (error) {
         if (error instanceof StorageError && error.message.includes('PreconditionFailed')) {
-          retries--;
-          await new Promise(resolve => setTimeout(resolve, 100 * (4 - retries)));
-          continue;
+          if (attempt < maxRetries - 1) {
+            // Exponential backoff with jitter
+            const baseDelay = 100 * Math.pow(2, attempt);
+            const jitter = Math.random() * 50;
+            await new Promise(resolve => setTimeout(resolve, baseDelay + jitter));
+            continue;
+          }
         }
         // Ignore if shard doesn't exist
         if (error instanceof StorageError && error.message.includes('not found')) {
@@ -104,6 +138,7 @@ export class ShardManager {
         throw error;
       }
     }
+    throw new StorageError('Failed to remove document after retries');
   }
 
   /**
@@ -111,7 +146,7 @@ export class ShardManager {
    */
   async findById(docId: string): Promise<Record<string, any> | null> {
     const shardId = getShardId(docId, this.shardCount);
-    const shard = await this.readShard(shardId);
+    const { shard } = await this.readShard(shardId);
     return shard.documents[docId] || null;
   }
 
@@ -119,17 +154,37 @@ export class ShardManager {
    * Query documents matching filter
    */
   async query(filter: QueryFilter<any>): Promise<Array<Record<string, any>>> {
-    // Read all shards in parallel
-    const shardPromises = Array.from(
-      { length: this.shardCount },
-      (_, i) => this.readShard(i)
-    );
+    // Optimization: If filter contains id equality, target specific shard
+    if (filter.id && typeof filter.id === 'string') {
+      const targetShardId = getShardId(filter.id, this.shardCount);
+      const { shard } = await this.readShard(targetShardId);
+      const doc = shard.documents[filter.id];
+      if (doc && evaluateFilter(doc, filter)) {
+        return [doc];
+      }
+      return [];
+    }
 
-    const shards = await Promise.all(shardPromises);
+    // Read all shard metadata first (lightweight)
+    const metadataPromises = Array.from(
+      { length: this.shardCount },
+      (_, i) => this.readShardMetadata(i)
+    );
+    const allMetadata = await Promise.all(metadataPromises);
+
+    // Filter out empty shards
+    const nonEmptyShardIds = allMetadata
+      .map((meta, index) => ({ meta, index }))
+      .filter(({ meta }) => meta && meta.docCount > 0)
+      .map(({ index }) => index);
+
+    // Read only non-empty shards in parallel
+    const shardPromises = nonEmptyShardIds.map(i => this.readShard(i));
+    const shardResults = await Promise.all(shardPromises);
 
     // Filter documents across all shards
     const results: Array<Record<string, any>> = [];
-    for (const shard of shards) {
+    for (const { shard } of shardResults) {
       for (const doc of Object.values(shard.documents)) {
         if (evaluateFilter(doc, filter)) {
           results.push(doc);
