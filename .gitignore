@@ -11,6 +11,7 @@ local-db-data/
 examples/*/local-db-data/
 .claude/settings.local.json
 .npmrc.local
+docs/plans/
 
 # Website
 apps/website/.vitepress/cache
