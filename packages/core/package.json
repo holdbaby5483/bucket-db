@@ -1,6 +1,7 @@
 {
   "name": "@hold-baby/bucket-db",
   "version": "0.3.0",
+  "description": "A TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system. No database servers needed.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -41,5 +42,9 @@
     "type": "git",
     "url": "https://github.com/holdbaby5483/bucket-db.git",
     "directory": "packages/core"
+  },
+  "homepage": "https://github.com/holdbaby5483/bucket-db#readme",
+  "bugs": {
+    "url": "https://github.com/holdbaby5483/bucket-db/issues"
   }
 }
