@@ -85,19 +85,21 @@ bun run examples/dbpath-demo/index.ts
 ```
 bucket-db/
 ├── packages/
-│   ├── core/                 # Core database engine
-│   │   ├── src/
-│   │   │   ├── core/        # BucketDB, Collection
-│   │   │   ├── storage/     # Storage adapters
-│   │   │   ├── index/       # Shard management
-│   │   │   ├── query/       # Query evaluation
-│   │   │   └── utils/       # Hash utilities
-│   │   └── tests/           # Test files
-│   └── types/               # TypeScript type definitions
+│   └── core/                 # Core database engine (published as @hold-baby/bucket-db)
+│       ├── src/
+│       │   ├── core/        # BucketDB, Collection
+│       │   ├── storage/     # Storage adapters
+│       │   ├── index/       # Shard management
+│       │   ├── query/       # Query evaluation
+│       │   ├── types/       # TypeScript type definitions
+│       │   └── utils/       # Hash utilities
+│       └── tests/           # Test files
+├── apps/                    # Internal apps (not published)
+│   ├── mcp/                 # MCP server for AI tools
+│   └── website/             # VitePress documentation site
 ├── examples/                # Example projects
 ├── docs/                    # Documentation
-│   ├── API.md              # API reference
-│   └── plans/              # Design and implementation docs
+│   └── API.md              # API reference
 ├── package.json            # Root workspace config
 └── bunfig.toml            # Bun configuration
 ```
@@ -105,7 +107,7 @@ bucket-db/
 ### Key Files
 
 - `packages/core/src/index.ts` - Main export file
-- `packages/types/src/index.ts` - Type definitions
+- `packages/core/src/types/index.ts` - Type definitions
 - `packages/core/tests/` - All test files
 
 ---

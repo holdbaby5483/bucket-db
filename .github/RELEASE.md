@@ -56,34 +56,26 @@
 
 ```bash
 # 1. 构建
-cd packages/types && bun run build
-cd ../core && bun run build
+cd packages/core && bun run build
 
 # 2. 更新版本号
-cd packages/types
-npm version 0.1.1 --no-git-tag-version
-
-cd ../core
-npm version 0.1.1 --no-git-tag-version
-# 手动更新 package.json 中 @bucket-db/types 的版本
+npm version <new-version> --no-git-tag-version
 
 # 3. 发布
 npm login
-cd packages/types && npm publish --access public
-cd ../core && npm publish --access public
+npm publish --access public
 ```
 
 ### 验证发布
 
 ```bash
 # 检查 npm 上的版本
-npm view @bucket-db/core version
-npm view @bucket-db/types version
+npm view @hold-baby/bucket-db version
 
 # 测试安装
 mkdir test-install && cd test-install
 npm init -y
-npm install @bucket-db/core
+npm install @hold-baby/bucket-db
 ```
 
 ## 常见问题
