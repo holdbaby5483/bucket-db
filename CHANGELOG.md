@@ -5,6 +5,33 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-12
+
+### Added
+
+- MCP (Model Context Protocol) server (`apps/mcp`) for AI tool integration
+  - 5 tools: `db_insert`, `db_find_by_id`, `db_find`, `db_update`, `db_delete`
+  - stdio transport, supports FileSystem / S3 / OSS adapters via env vars
+- AI-friendly `llms.txt` bundled with npm package
+- npm package metadata: description, homepage, bugs URL
+
+### Fixed
+
+- npm tarball now includes `dist/` directory (added `files` field)
+- `publishConfig.registry` points to npmjs.org (not mirror)
+
+## [0.3.0] - 2026-03-16
+
+### Added
+
+- Write-Ahead Log (WAL) for durability
+- LRU cache implementation
+- Path validator utility for safe dbPath/collection names
+
+### Changed
+
+- Enhanced shard manager, query evaluator, and storage adapters
+
 ## [0.2.0] - 2026-03-08
 
 ### Changed
