@@ -22,10 +22,10 @@ Types: Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, Upda
 
 ```
 insert(data: InsertDocument<T>): Promise<T>
-findById(id: string): Promise<T>                          // throws DocumentNotFoundError if missing
+findById(id: string): Promise<T | null>                    // returns null if not found
 find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]>
 update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>
-delete(id: string, options?: UpdateOptions): Promise<void>
+delete(id: string): Promise<void>
 ```
 
 ### QueryOptions
@@ -40,7 +40,7 @@ $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin
 
 ### Error mapping
 
-DocumentNotFoundError  — findById / update / delete on missing doc
+DocumentNotFoundError  — update / delete on missing doc (findById returns null instead)
 ConcurrentUpdateError  — update / delete with stale etag
 ValidationError        — invalid input
 StorageError           — underlying I/O failure

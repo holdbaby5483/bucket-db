@@ -142,12 +142,10 @@ import {
   StorageError,
 } from '@hold-baby/bucket-db';
 
-try {
-  const user = await users.findById('nonexistent-id');
-} catch (err) {
-  if (err instanceof DocumentNotFoundError) {
-    // Document does not exist
-  }
+// findById returns null if not found (does NOT throw)
+const user = await users.findById('nonexistent-id');
+if (!user) {
+  // Document does not exist
 }
 
 try {
@@ -156,12 +154,15 @@ try {
   if (err instanceof ConcurrentUpdateError) {
     // Another write happened — re-fetch and retry
   }
+  if (err instanceof DocumentNotFoundError) {
+    // Document was deleted between read and update
+  }
 }
 ```
 
 | Error class | When thrown |
 |---|---|
-| `DocumentNotFoundError` | `findById` or `update`/`delete` on a missing document |
+| `DocumentNotFoundError` | `update`/`delete` on a missing document (`findById` returns `null` instead) |
 | `ConcurrentUpdateError` | `update`/`delete` with a stale `etag` |
 | `ValidationError` | Invalid input (e.g. missing required fields) |
 | `StorageError` | Underlying storage failure (S3, OSS, filesystem I/O) |
