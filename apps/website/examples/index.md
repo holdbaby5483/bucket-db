@@ -21,7 +21,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/[username]/bucket-db.git
+git clone https://github.com/holdbaby5483/bucket-db.git
 cd bucket-db
 
 # 安装依赖

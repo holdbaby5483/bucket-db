@@ -14,10 +14,10 @@ export default defineConfig({
       { text: 'API', link: '/api/' },
       { text: '示例', link: '/examples/' },
       {
-        text: 'v0.1.0',
+        text: 'v0.3.1',
         items: [
-          { text: 'GitHub', link: 'https://github.com/hold-baby/bucket-db' },
-          { text: 'Changelog', link: 'https://github.com/hold-baby/bucket-db/releases' },
+          { text: 'GitHub', link: 'https://github.com/holdbaby5483/bucket-db' },
+          { text: 'Changelog', link: 'https://github.com/holdbaby5483/bucket-db/releases' },
         ]
       }
     ],
@@ -76,7 +76,7 @@ export default defineConfig({
     },
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/hold-baby/bucket-db' }
+      { icon: 'github', link: 'https://github.com/holdbaby5483/bucket-db' }
     ],
 
     footer: {
@@ -85,7 +85,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/hold-baby/bucket-db/edit/main/apps/website/:path',
+      pattern: 'https://github.com/holdbaby5483/bucket-db/edit/main/apps/website/:path',
       text: '在 GitHub 上编辑此页'
     },
 

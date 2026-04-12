@@ -1,6 +1,6 @@
 # BucketDB API Reference
 
-Complete API documentation for BucketDB v0.1.0.
+Complete API documentation for BucketDB v0.3.1.
 
 ## Table of Contents
 
