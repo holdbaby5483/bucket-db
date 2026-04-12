@@ -5,9 +5,17 @@
 
 Monorepo for BucketDB — a TypeScript document database built on cloud object storage (AWS S3 / Alibaba Cloud OSS) or local file system.
 
+## Documentation
+
+📚 https://bucket-db.vercel.app
+
 ## Packages
 
-- [`@hold-baby/bucket-db`](packages/core) — Core database engine ([README](packages/core/README.md))
+| Package | Description |
+|---------|-------------|
+| [`@hold-baby/bucket-db`](packages/core) | Core database engine ([README](packages/core/README.md)) |
+| [`@hold-baby/bucket-db-mcp`](apps/mcp) | MCP server for AI tool integration (private) |
+| [`@hold-baby/bucket-db-website`](apps/website) | Documentation site (private) |
 
 ## Development
 

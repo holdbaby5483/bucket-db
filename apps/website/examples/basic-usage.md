@@ -18,7 +18,7 @@ interface User extends Document {
 
 async function main() {
   // 2. 创建数据库实例（使用内存存储）
-  const db = new BucketDB(new MemoryStorageAdapter(), 'demo-app');
+  const db = new BucketDB(new MemoryStorageAdapter(), 'my-app');
 
   // 3. 获取集合
   const users = db.collection<User>('users');

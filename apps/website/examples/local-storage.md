@@ -2,6 +2,8 @@
 
 使用 FileSystemAdapter 进行本地持久化存储。
 
+> 💡 以下代码为简化版本，展示 Todo 场景。完整源码见 `examples/local-storage/index.ts`（使用 User 接口）。
+
 ## 完整代码
 
 ```typescript
