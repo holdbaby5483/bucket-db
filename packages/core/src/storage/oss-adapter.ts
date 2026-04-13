@@ -85,29 +85,49 @@ export class OSSAdapter implements StorageAdapter {
   async put(key: string, data: any, options?: PutOptions): Promise<{ etag: string }> {
     return this.withRetry(async () => {
       try {
-      const headers: Record<string, string> = {};
+        // Alibaba Cloud OSS does not support If-Match/If-None-Match headers on PUT.
+        // Implement optimistic locking via HEAD check before writing.
+        if (options?.ifMatch) {
+          const currentEtag = await this.getEtag(key);
+          if (currentEtag !== options.ifMatch) {
+            throw new StorageError('PreconditionFailed: ETag mismatch');
+          }
+        }
+        if (options?.ifNoneMatch) {
+          const exists = await this.exists(key);
+          if (exists) {
+            throw new StorageError('PreconditionFailed: Object already exists');
+          }
+        }
 
-      if (options?.ifMatch) {
-        headers['If-Match'] = options.ifMatch;
-      }
-      if (options?.ifNoneMatch) {
-        headers['If-None-Match'] = options.ifNoneMatch;
-      }
+        const result = await this.client.put(key, Buffer.from(JSON.stringify(data)));
 
-      const result = await this.client.put(key, Buffer.from(JSON.stringify(data)), {
-        headers,
-      });
-
-      return {
-        etag: result.res.headers.etag?.replace(/"/g, '') || '',
-      };
+        return {
+          etag: result.res.headers.etag?.replace(/"/g, '') || '',
+        };
       } catch (error: any) {
-      if (error.code === 'PreconditionFailed') {
-        throw new StorageError('PreconditionFailed: ETag mismatch');
+        if (error instanceof StorageError) {
+          throw error;
+        }
+        throw new StorageError(`Failed to put object: ${error.message}`, error);
       }
-      throw new StorageError(`Failed to put object: ${error.message}`, error);
+    });
+  }
+
+  /**
+   * Get the ETag of an object via HEAD request.
+   * Returns null if the object does not exist.
+   */
+  private async getEtag(key: string): Promise<string | null> {
+    try {
+      const result = await this.client.head(key) as any;
+      return result.res.headers.etag?.replace(/"/g, '') || null;
+    } catch (error: any) {
+      if (error.code === 'NoSuchKey') {
+        return null;
+      }
+      throw error;
     }
-      });
   }
 
   async delete(key: string): Promise<void> {
