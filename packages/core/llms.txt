@@ -1,12 +1,13 @@
 # BucketDB
 
-TypeScript document database (version 0.4.0-beta.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun.
+TypeScript document database (version 0.4.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun.
 
 ## Key concepts
 
-- `BucketDB` — `new BucketDB(adapter, dbPath)`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
+- `BucketDB` — `new BucketDB(adapter, dbPath, { logger? })`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
 - `Collection<T>` — typed collection, returned by `db.collection<T>(name)` (same instance per name)
-- Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no query cache.
+- Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no result cache.
+- Query snapshot (S3 / OSS / custom adapters with `remote: true` only): `<dbPath>/<collection>/_snapshot.v1.json` = `{ format: 'bucket-db-snapshot', version: 1, documents: { <id>: { etag, body } } }`. find LISTs docs/, uses a snapshot entry only if its etag equals the listed etag, GETs the rest (16 in parallel). The LIST is the authority: a missing/corrupt/stale/overwritten snapshot only costs speed, never changes results. Rewritten (unconditional PUT) when > 16 documents had to be read individually (+ entries of deleted docs). Memory / FileSystem keep no snapshot.
 - Every document extends `Document`: `id` (UUID, taken from the object key), `_etag` (from storage, not stored in the body), `_createdAt`, `_updatedAt`
 - `InsertDocument<T>` and `UpdateDocument<T>` exclude `id`, `_etag`, `_createdAt`, `_updatedAt` (UpdateDocument is also Partial); system fields passed at runtime are dropped
 - Optimistic locking: `update(id, data, { etag: doc._etag })`; stale etag or lost race throws ConcurrentUpdateError (no retry). Works on Memory, S3, and FileSystem within one process. On OSS, update with etag throws UnsupportedError.
@@ -23,14 +24,17 @@ TypeScript document database (version 0.4.0-beta.0). Uses AWS S3 / Alibaba Cloud
 
 Multiple writer processes are supported for insert/delete on every backend and for update on S3 (Memory/FileSystem: within one process).
 
-## Limitations (0.4.0-beta.0)
+## Limitations (0.4.0)
 
 - No transactions; each write touches one document.
-- Every find lists the collection and GETs every document (16 in parallel), then filters in memory; only `{ id: '...' }` reads one document. No benchmarks yet; no capacity is claimed. Intended for small collections (thousands of documents) and a few writes per second.
+- Envelope: at most 10,000 documents and 10 MB of snapshot per collection; past it the collection logs one `warn` and queries keep getting slower. Measured warm find at 10,000 docs: OSS 1.35 s, S3 3.2 s, FileSystem ~0.5 s; no snapshot at 10,000 docs: OSS 34 s, S3 134 s (docs/BENCHMARKS.md).
+- find cost on S3/OSS: ⌈N/1000⌉ LIST + 1 GET (snapshot) + 1 GET per document changed since the snapshot (≤ 16), or those GETs + 1 snapshot PUT when more changed. Memory/FileSystem: ⌈N/1000⌉ LIST + N GET. `{ id: '...' }` reads one document. limit/offset do not reduce reads.
+- Results are not a point-in-time snapshot: each returned document is some committed version.
+- Snapshot read errors other than not-found (transient, permission) fail find with StorageError. Snapshot write failures do not fail find; they go to the logger (level `error`); after 401/403 (read-only credentials) the collection stops writing it.
+- Deleted documents' contents remain in the snapshot until it is rewritten or `compact()` runs.
 - OSS: no conditional update (etag → UnsupportedError); concurrent etag-less updates are last-writer-wins.
 - FileSystem: etag checks / concurrent update merging hold only within one process.
-- 0.3.x and 0.4 clients must not write the same collection concurrently. 0.4 reads 0.3 data as-is; it reads nothing outside `docs/` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted.
-- Beta: API may change before 0.4.0.
+- 0.3.x and 0.4 clients must not write the same collection concurrently. 0.4 reads 0.3 data as-is; it reads only `docs/` and `_snapshot.v1.json` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted.
 
 ## Package: @hold-baby/bucket-db
 
@@ -38,16 +42,27 @@ Multiple writer processes are supported for insert/delete on every backend and f
 
 Classes: BucketDB, Collection, MemoryStorageAdapter, FileSystemAdapter, S3Adapter, OSSAdapter
 Errors: BucketDBError, ValidationError, DocumentNotFoundError, ConcurrentUpdateError, UnsupportedError, StorageError
-Types: Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
+Types: BucketDBOptions, CollectionOptions, Logger, LogEvent, Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
 
 ### Collection API
 
 ```
 insert(data: InsertDocument<T>): Promise<T>                 // 1 conditional PUT, generated UUID id
 findById(id: string): Promise<T | null>                     // 1 GET; null ONLY if missing, other storage errors throw
-find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + GET all; results in id (key) order
+find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + snapshot (S3/OSS) or GET all (local); results in id (key) order
 update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>   // GET + conditional PUT
 delete(id: string): Promise<void>                           // 1 DELETE; no error if missing
+compact(): Promise<void>                                    // S3/OSS: rebuild the snapshot (LIST + GET all + PUT), drops deleted docs' contents; throws on failure; no-op locally
+```
+
+### Logger
+
+```
+new BucketDB(adapter, dbPath, { logger: (event: LogEvent) => void })   // default: console.warn
+LogEvent = { level: 'warn' | 'error', message: string, error?: unknown }
+```
+
+Receives: snapshot write failures (error), unparsable snapshot being rebuilt (warn), envelope exceeded (warn, once per collection).
 ```
 
 ### QueryOptions / UpdateOptions
@@ -70,6 +85,8 @@ new S3Adapter({ bucket, region?, endpoint?, credentials?, forcePathStyle?, timeo
 new OSSAdapter({ bucket, region?, endpoint?, credentials?, timeoutMs? })
 credentials: { accessKeyId, secretAccessKey, sessionToken?, expiresAt? } | (() => Promise<that>)   // provider re-called 5 min before expiresAt
 ```
+
+Custom adapters implement StorageAdapter { capabilities, remote?, get, put, delete, list }; set `remote: true` to get the query snapshot (S3Adapter and OSSAdapter do).
 
 S3 defaults: region AWS_REGION / AWS_DEFAULT_REGION; endpoint AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL / https://s3.<region>.amazonaws.com; credentials AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. Any S3-compatible service via endpoint; only AWS S3 and OSS are tested.
 OSS defaults: region OSS_REGION (`cn-hangzhou`; `oss-cn-hangzhou` also accepted); endpoint https://s3.oss-<region>.aliyuncs.com (S3-compatible; OSS_ENDPOINT is not read); credentials OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SESSION_TOKEN.

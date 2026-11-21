@@ -1,18 +1,20 @@
-# Migrating from 0.3.x to 0.4.0-beta.0
+# Migrating from 0.3.x to 0.4.0
 
-0.4.0-beta.0 rewrites the storage core. Each document is one object, `<dbPath>/<collection>/docs/<id>.json`; there is no index and no write-ahead log, every write is a single storage request, and the S3 / OSS client is built in (no runtime dependencies). The document format is unchanged, so 0.4 reads 0.3 collections as they are. Several APIs changed, and custom storage adapters must be rewritten.
+0.4.0 rewrites the storage core. Each document is one object, `<dbPath>/<collection>/docs/<id>.json`; there is no index and no write-ahead log, every write is a single storage request, and the S3 / OSS client is built in (no runtime dependencies). On S3 and OSS, queries keep a disposable snapshot next to `docs/` so they do not download every document. The document format is unchanged, so 0.4 reads 0.3 collections as they are. Several APIs changed, and custom storage adapters must be rewritten.
 
-> **Beta.** The API may still change before 0.4.0. Prereleases are published under the `next` dist-tag: `npm install @hold-baby/bucket-db@next`.
+```bash
+npm install @hold-baby/bucket-db
+```
 
 ## What changed
 
-| | 0.3.x | 0.4.0-beta.0 |
+| | 0.3.x | 0.4.0 |
 |---|---|---|
-| Storage layout | documents + index shards + log | only `<dbPath>/<collection>/docs/<id>.json` |
+| Storage layout | documents + index shards + log | `<dbPath>/<collection>/docs/<id>.json`; on S3 / OSS also `<dbPath>/<collection>/_snapshot.v1.json` |
 | Runtime dependencies | AWS SDK, ali-oss | none |
 | Runtime | not declared | Node.js >= 20 or Bun |
 | `insert` | 6 requests | 1 conditional PUT |
-| `find` | downloads the index | lists the collection and reads every document; `{ id }` reads one |
+| `find` | downloads the index | lists the collection; on S3 / OSS reads the snapshot plus documents changed since it, on Memory / FileSystem reads every document; `{ id }` reads one |
 | Shard options | `defaultShardCount` / `shardCount` | removed |
 | `delete` of a missing document | throws `DocumentNotFoundError` | succeeds (idempotent) |
 | Invalid names | rewritten (`a/b` → `a_b`) or `PathValidationError` | `ValidationError`, never rewritten |
@@ -24,13 +26,14 @@
 | `update` without `etag`, concurrent | could reject under contention | retried; concurrent partial updates all apply (except OSS: last writer wins) |
 | `UpdateDocument<T>` | could include `_etag`, `_createdAt`, `_updatedAt` | excludes all system fields |
 | Multiple writer processes | not supported | supported, see the guarantees table in the README |
+| Warnings | none | snapshot write failures and envelope warnings go to `logger` (default `console.warn`) |
 | `StorageAdapter` | `get/put/delete/exists/listKeys/batchGet`, JSON values | `capabilities` + `get/put/delete/list`, bytes, paginated |
 
 ## Breaking changes
 
 ### Shard options removed
 
-`BucketDB` takes no third argument and `db.collection()` no second argument.
+`BucketDB`'s third argument no longer takes shard options (it now takes `{ logger }`), and `db.collection()` takes no second argument.
 
 ```typescript
 // 0.3
@@ -42,9 +45,9 @@ const db = new BucketDB(adapter, 'my-app');
 const users = db.collection<User>('users');
 ```
 
-### Query result cache stays removed
+### No query result cache
 
-The in-process query cache removed in 0.3.2 does not return; every `find` reads storage. Cache in your application if you need to.
+The in-process query cache removed in 0.3.2 does not return. Every `find` lists storage, so it reflects completed writes; on S3 / OSS document bodies come from the query snapshot when their etag still matches. Cache results in your application if you need to.
 
 ### `delete` is idempotent
 
@@ -193,7 +196,7 @@ System fields passed at runtime anyway are dropped.
 ### Type exports
 
 - **Removed:** `StorageObject`, `PutOptions`, `StorageCredentials`, `StorageAdapterConfig`, `ICollection`, `CollectionMeta`, `IndexShard`
-- **Added:** `UnsupportedError`, `Capabilities`, `Guarantee`, `WriteCondition`, `ObjectEntry`, `ListPage`, `ListOptions`, `S3AdapterOptions`, `OSSAdapterOptions`, `Credentials`, `CredentialProvider`, `FileSystemAdapterConfig`, `StorageErrorKind`, `StorageErrorOptions`
+- **Added:** `UnsupportedError`, `Capabilities`, `Guarantee`, `WriteCondition`, `ObjectEntry`, `ListPage`, `ListOptions`, `S3AdapterOptions`, `OSSAdapterOptions`, `Credentials`, `CredentialProvider`, `FileSystemAdapterConfig`, `StorageErrorKind`, `StorageErrorOptions`, `BucketDBOptions`, `CollectionOptions`, `Logger`, `LogEvent`
 
 ```typescript
 // 0.3
@@ -208,11 +211,13 @@ import type { Credentials, S3AdapterOptions, OSSAdapterOptions } from '@hold-bab
 The document objects `docs/<id>.json` have not changed. **No data conversion is needed.**
 
 1. **Stop every 0.3 writer.** 0.3 reads only its own index and does not see 0.4 writes, so 0.3 and 0.4 must not write the same collection at the same time.
-2. Upgrade to `@hold-baby/bucket-db@0.4.0-beta.0` and apply the code changes above.
+2. Upgrade to `@hold-baby/bucket-db@0.4.0` and apply the code changes above.
 3. Start the 0.4 clients.
 4. Optionally delete 0.3's `index/` and `wal/` directories and `docs/*.meta` files. 0.4 ignores them; deleting them only saves space.
 
 0.4 lists `docs/` directly instead of reading 0.3's index. A document file that the 0.3 index did not list — for example from a 0.3 `insert` that failed after writing the document — now appears in `find` results, and `find` returns each document file's content where the 0.3 index copy may have been stale. Run `find({})` once after the upgrade if this matters to you.
+
+On S3 and OSS, 0.4 creates one new object per collection it queries: `<dbPath>/<collection>/_snapshot.v1.json`, next to `docs/` (written once a query has had to read more than 16 documents individually). It is a cache: deleting it is always safe, and it is rebuilt. It holds copies of document contents, so apply the same access rules as to `docs/`. Read-only credentials work: when the snapshot cannot be written (401 / 403), queries still return correct results, the failure is logged once, and that collection stops trying to write it; each query then reads the documents that changed since the last snapshot, or every document if there is none. See [STORAGE-FORMAT.md](./STORAGE-FORMAT.md).
 
 ## Rewriting a custom storage adapter
 
@@ -232,6 +237,7 @@ interface StorageAdapter {
 // 0.4
 interface StorageAdapter {
   readonly capabilities: Capabilities;
+  readonly remote?: boolean;
   get(key: string): Promise<{ body: Uint8Array; etag: string }>;
   put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }>;
   delete(key: string): Promise<void>;
@@ -248,6 +254,7 @@ Contract:
 - `delete` of a missing key: no error.
 - `list` returns `{ key, etag }` entries in lexicographic key order, at most `limit` per page (default and maximum 1000), plus a `cursor` when another page follows. The etag is unquoted and equals what `get` / `put` report for the same version.
 - Retryable failures that persist: `kind: 'transient'`; everything else: `kind: 'permanent'`.
+- `remote` (optional): `true` for backends where every request is a network round trip. `Collection` then keeps the query snapshot; leave it unset for local backends.
 
 `exists`, `listKeys` and `batchGet` are gone: BucketDB lists documents with `list` and reads them with concurrent `get` calls. JSON encoding moved into `Collection`; adapters see only bytes.
 
@@ -310,5 +317,6 @@ For a backend that cannot do conditional writes at all, declare `'none'` for tha
 ## See also
 
 - [README](../packages/core/README.md): guarantees per backend and remaining limits
+- [Guarantees and limits](./GUARANTEES.md) and [storage format](./STORAGE-FORMAT.md)
 - [API reference](./API.md)
 - [CHANGELOG](../CHANGELOG.md)

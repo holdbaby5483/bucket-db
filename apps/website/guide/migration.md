@@ -1,16 +1,13 @@
-# 从 0.3 升级到 0.4.0-beta.0
+# 从 0.3 升级到 0.4
 
-0.4.0-beta.0 重写了存储核心：每个文档一个对象，不再有索引和日志文件，零运行时依赖，内置 S3 客户端。文档数据格式没有变化，0.4 可以直接读取 0.3 的集合；但部分 API 有破坏性变更，自定义存储适配器需要重写。
-
-::: warning beta
-在 0.4.0 正式版之前 API 仍可能调整。
-:::
+0.4.0 重写了存储核心：每个文档一个对象，不再有索引和日志文件，零运行时依赖，内置 S3 客户端。文档数据格式没有变化，0.4 可以直接读取 0.3 的集合；但部分 API 有破坏性变更，自定义存储适配器需要重写。
 
 ## 变更一览
 
-| 项目 | 0.3.x | 0.4.0-beta.0 |
+| 项目 | 0.3.x | 0.4.0 |
 |------|-------|--------------|
-| 存储布局 | 文档 + 索引分片 + 日志 | 只有 `<dbPath>/<collection>/docs/<id>.json` |
+| 存储布局 | 文档 + 索引分片 + 日志 | `docs/<id>.json`；S3/OSS 另有 `_snapshot.v1.json` |
+| `find` | 下载索引 | S3/OSS：LIST + 快照 + 变化的文档；Memory/FileSystem：读取每个文档；`{ id }` 只读一个 |
 | 运行时依赖 | AWS SDK、ali-oss | 无 |
 | 分片配置 | `defaultShardCount` / `shardCount` | 移除 |
 | `delete` 不存在的文档 | 抛 `DocumentNotFoundError` | 不报错（幂等） |
@@ -190,11 +187,13 @@ import type { Credentials, S3AdapterOptions, OSSAdapterOptions } from '@hold-bab
 文档对象 `docs/<id>.json` 的格式没有变化，**不需要转换数据**，0.4 可以直接读取 0.3 的集合。
 
 1. **停止所有 0.3 写入进程**。0.3 只读取自己的索引，看不到 0.4 的写入；0.3 和 0.4 不能同时写入同一集合。
-2. 升级依赖到 `@hold-baby/bucket-db@0.4.0-beta.0`，按上文修改代码。
+2. 升级依赖到 `@hold-baby/bucket-db@0.4.0`，按上文修改代码。
 3. 启动 0.4 客户端。
 4. （可选）删除 0.3 遗留的 `index/`、`wal/` 目录和 `docs/*.meta` 文件。0.4 会忽略它们，删除只是为了节省存储空间。
 
 0.4 直接列出 `docs/`，不再读取 0.3 的索引。0.3 索引里没有登记的文档文件（例如 0.3 中写完文档后失败的 `insert`）现在会出现在 `find` 结果中；`find` 返回的是文档文件本身的内容，而 0.3 的索引副本可能已经过时。如果这一点对你重要，升级后执行一次 `find({})` 检查。
+
+在 S3/OSS 上，0.4 的查询会在集合里创建 `_snapshot.v1.json`（某次查询需要逐个读取的文档超过 16 个时写入；位于 `docs/` 旁边，与 0.3 遗留的 `index/`、`wal/` 并列，后两者仍被忽略）。快照只用于加速查询，可随时删除，见[存储格式](./storage-format)。快照包含文档内容的副本，访问权限应与 `docs/` 相同。只读凭证同样可用：第一次遇到 401/403 后该集合就不再尝试写快照，查询照常返回正确结果。
 
 ## 重写自定义存储适配器
 
@@ -214,6 +213,7 @@ interface StorageAdapter {
 // 0.4
 interface StorageAdapter {
   readonly capabilities: Capabilities;
+  readonly remote?: boolean;
   get(key: string): Promise<{ body: Uint8Array; etag: string }>;
   put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }>;
   delete(key: string): Promise<void>;
@@ -229,6 +229,7 @@ interface StorageAdapter {
 - `put` 请求了一个能力为 `'none'` 的条件：抛 `UnsupportedError`，且不发送请求。
 - `delete` 不存在的 key：不报错。
 - `list` 按 key 的字典序返回 `{ key, etag }`，每页最多 1000 条（`limit` 默认且最大 1000）；还有下一页时返回 `cursor`。`list` 返回的 etag 必须与 `get` / `put` 对同一版本返回的 etag 相同（不带引号）。
+- `remote: true`（可选）：声明这是远程后端，集合会为它维护查询快照 `_snapshot.v1.json`（与 S3/OSS 相同）；不声明时每次 `find` 读取每个文档。
 
 示例（基于 `Map` 的实现，与内置 `MemoryStorageAdapter` 相同）：
 

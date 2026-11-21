@@ -14,7 +14,7 @@ export default defineConfig({
       { text: 'API', link: '/api/' },
       { text: '示例', link: '/examples/' },
       {
-        text: 'v0.4.0-beta.0',
+        text: 'v0.4.0',
         items: [
           { text: 'GitHub', link: 'https://github.com/holdbaby5483/bucket-db' },
           { text: 'Changelog', link: 'https://github.com/holdbaby5483/bucket-db/releases' },
@@ -37,7 +37,9 @@ export default defineConfig({
           items: [
             { text: '概念介绍', link: '/guide/concepts' },
             { text: '查询语法', link: '/guide/queries' },
-            { text: '错误处理', link: '/guide/error-handling' }
+            { text: '错误处理', link: '/guide/error-handling' },
+            { text: '存储格式', link: '/guide/storage-format' },
+            { text: '保证与限制', link: '/guide/guarantees' }
           ]
         },
         {

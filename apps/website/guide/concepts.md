@@ -40,7 +40,7 @@ const users = db.collection<User>('users');
 **特性**：
 - **类型安全** - 泛型参数提供完整的类型推断
 - **单例模式** - 同一个 `BucketDB` 实例中，同名集合返回同一 `Collection` 实例
-- **无额外文件** - 集合只是 `docs/` 目录下的一组文档对象，没有索引或元数据文件
+- **无额外文件** - 集合是 `docs/` 目录下的一组文档对象，没有索引或元数据文件；S3/OSS 上另有一个可随时删除的查询快照（见[快照](#快照)）
 
 `db.collection(name)` 只接受集合名一个参数，没有其他配置项。
 
@@ -115,6 +115,7 @@ S3 与 OSS 的重试覆盖网络错误、超时、5xx（500/502/503/504）、429
   {collectionName}/
     docs/
       {id}.json           # 文档文件
+    _snapshot.v1.json     # 仅 S3/OSS：查询快照
 ```
 
 **示例**：
@@ -125,9 +126,10 @@ my-app/
     docs/
       0b6c1f3e-...-uuid.json
       7d2a9c41-...-uuid.json
+    _snapshot.v1.json
 ```
 
-没有索引、没有日志、没有元数据文件，也没有查询缓存。手动放到 `docs/<id>.json` 的 JSON 文件也会被当作文档读取。
+没有索引、没有日志、没有元数据文件，也没有查询结果缓存。S3/OSS 上的 `_snapshot.v1.json` 位于 `docs/` 旁边，只用于加速查询，可以随时删除（见[快照](#快照)）；Memory 和 FileSystem 不写快照。手动放到 `docs/<id>.json` 的 JSON 文件也会被当作文档读取。完整规则见[存储格式](./storage-format)。
 
 `docs/` 下以 `.` 开头的隐藏文件（如 `.DS_Store`）会被忽略；FileSystemAdapter 还会忽略自己的 `*.tmp` 临时文件和 0.3 遗留的 `*.meta` 文件。其他不是 `<合法 ID>.json` 或内容不是 JSON 对象的文件会让 `find` 抛出 `StorageError`，`error.key` 指出是哪个对象。
 
@@ -140,11 +142,59 @@ my-app/
 | `update` | 1 次 GET + 1 次条件 PUT |
 | `delete` | 1 次 DELETE（幂等，文档不存在也不报错） |
 | `find({ id: '...' })` | 1 次 GET（`id` 为普通字符串时） |
-| 其他 `find` | LIST `docs/`（每 1000 个文档 1 次请求）+ GET **每一个**文档（并发 16 个） |
+| `find`（S3/OSS，热） | LIST `docs/`（每 1000 个文档 1 次请求）+ 1 次快照 GET + 自快照以来每个变化文档 1 次 GET；变化超过 16 个时再加 1 次快照 PUT |
+| `find`（Memory/FileSystem） | 列出 `docs/` + 读取**每一个**文件（并发 16 个） |
+| `compact()` | S3/OSS：LIST + GET 每个文档 + 1 次快照 PUT；本地后端无操作 |
 
-`find` 在内存中过滤，然后应用 `offset` / `limit`。结果按 key 顺序（即 ID 顺序）返回；ID 是随机 UUID，因此**不是**插入顺序。目前没有 `sort`。在 LIST 与 GET 之间被删除的文档会被跳过。
+`find` 在内存中过滤，然后应用 `offset` / `limit`（不会减少读取）。结果按 key 顺序（即 ID 顺序）返回；ID 是随机 UUID，因此**不是**插入顺序。目前没有 `sort`。在 LIST 与 GET 之间被删除的文档会被跳过。
+
+实测耗时（见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)）：OSS 热 `find` 在 100 / 1,000 / 10,000 个文档时为 0.11 / 0.27 / 1.35 秒；S3（ap-southeast-2，测试客户端 RTT 约 200 ms）为 0.45 / 1.0 / 3.2 秒；10,000 个文档没有快照的冷查询 OSS 34 秒、S3 134 秒。FileSystem 在 10,000 个文档时每次 `find` 约 0.5 秒。
 
 `findById` 只在文档不存在时返回 `null`；其他存储错误（网络、权限等）会抛出 `StorageError`。
+
+## 快照
+
+在 S3、OSS 以及声明了 `remote: true` 的自定义适配器上，每个集合保留一个快照对象 `<dbPath>/<collection>/_snapshot.v1.json`，里面是每个文档的 etag 和内容。Memory 和 FileSystem 没有快照，每次 `find` 都读取每个文件。
+
+**`find` 的执行过程**（S3/OSS）：
+
+1. LIST `docs/`（每 1000 个文档 1 次请求），得到当前的文档和 etag
+2. GET 快照
+3. 只有快照条目的 etag 与 LIST 得到的 etag 相同时才使用该条目；其余文档逐个 GET（并发 16 个）
+
+LIST 是权威来源：快照缺失、损坏、过期、版本不同或被并发覆盖，只影响速度，不影响结果。快照不存在或无法解析时会被重建（无法解析时通过 `logger` 记录一条 `warn`）；读取快照时遇到暂时性错误或权限错误，查询失败并抛出 `StorageError`。
+
+**何时重写**：当查询逐个读取的文档数加上快照中已删除文档的条目数超过 16 时，查询会重写快照（无条件 PUT）。不超过 16 个变化时，这些文档在每次查询中都会被逐个 GET，直到下一次重写。
+
+**写入失败**：快照写入失败只会记录日志（`error` 级别），不会让查询失败。遇到 401/403（例如只读凭证）后，该 `Collection` 实例不再尝试写入，查询照常工作。
+
+**`compact()`**：`await collection.compact()` 用所有当前文档重建快照（LIST + GET 每个文档 + 1 次 PUT），并移除已删除文档的内容。本地后端上不做任何事。失败时抛出错误。
+
+::: warning 已删除文档的内容
+快照包含完整的文档内容。已删除文档的内容会留在快照中，直到快照被重写或执行 `compact()`。删除隐私敏感数据后请调用 `compact()`。
+:::
+
+**容量范围**：每个集合最多 10,000 个文档、10 MB 快照（10,000 个约 450 字节的文档快照约 5.2 MB）。超出后查询仍可用但更慢，每个 `Collection` 实例记录一次 `warn`；本地后端只检查文档数。
+
+**一致性级别**：返回的每个文档都是某个已提交的版本，但整个结果集不是集合在某一时刻的快照。
+
+bucket 的生命周期规则可以让文档过期；过期的文档会从 LIST 中消失，因此也不会出现在结果中。
+
+### 日志（`logger`）
+
+快照写入失败、快照无法解析和超出容量范围都通过 `logger` 报告，不会抛出。默认写到 `console.warn`，可以在创建数据库时替换：
+
+```typescript
+import { BucketDB } from '@hold-baby/bucket-db';
+import type { LogEvent } from '@hold-baby/bucket-db';
+
+const db = new BucketDB(adapter, 'my-app', {
+  logger: (event: LogEvent) => {
+    // event.level: 'warn' | 'error'
+    console.error(`[bucket-db] ${event.level}: ${event.message}`, event.error ?? '');
+  }
+});
+```
 
 ## 乐观锁（Optimistic Locking）
 
@@ -213,14 +263,18 @@ async function incrementAge(id: string) {
 
 所有后端都支持多个写入进程并发执行 `insert` / `delete`；S3 上还支持多个进程并发 `update`（Memory、FileSystem 限单进程内）。实测 4 个进程各插入 25 个文档，在 FileSystem、S3 和 OSS 上全部 100 个文档可见。
 
-当前版本（0.4.0-beta.0）的其他限制：
+详见[保证与限制](./guarantees)（每条保证都注明了对应的测试）。
+
+当前版本（0.4.0）的其他限制：
 
 1. **没有事务** - 每次写入只涉及一个文档。
-2. **没有基准测试** - 计划在 0.4.0 提供，目前不承诺容量数字。除 `{ id }` 外的每次 `find` 都会列出并读取集合中的每个文档，适合小型集合（数千个文档）和每秒少量写入。
+2. **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。S3/OSS 上热 `find` 为 LIST + 1 次快照 GET + 变化文档的 GET；Memory/FileSystem 上每次 `find` 读取每个文件。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
 3. **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
 4. **FileSystem** - 条件更新和并发更新合并只在单个进程内有效。
 5. **不能与 0.3.x 同时写入** - 0.3.x 只读取自己的索引，看不到 0.4 的写入；同一集合不能由 0.3.x 和 0.4 客户端同时写入。详见[升级指南](./migration)。
-6. **beta** - 0.4.0 正式版之前 API 仍可能调整（暂无 `sort`、`count`、自定义 ID）。
+6. **快照包含文档内容** - 已删除文档的内容在快照重写或 `compact()` 之前仍保留。
+7. **结果不是某一时刻的快照** - 每个文档都是已提交的版本，但结果集整体不是时间点一致的。
+8. **功能范围** - 暂无 `sort`、`count`、自定义 ID。
 
 ## 下一步
 

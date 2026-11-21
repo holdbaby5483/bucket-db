@@ -46,8 +46,8 @@ features:
     details: 通过 dbPath 参数实现多环境、多租户的数据隔离
 ---
 
-::: warning 0.4.0-beta.0
-当前版本为 beta,在 0.4.0 正式版之前 API 仍可能调整。从 0.3.x 升级请先阅读[升级指南](/guide/migration)。
+::: tip 0.4.0
+0.4.0 在 S3/OSS 上为查询增加了快照,热查询不再逐个读取文档。从 0.3.x 升级请先阅读[升级指南](/guide/migration)。
 :::
 
 ## 快速示例
@@ -92,20 +92,22 @@ await users.delete(user.id);
 
 ### 🎯 适用场景
 
-- **小型集合** - 每个集合数千个文档以内,每秒少量写入
+- **小型集合** - 每个集合最多约 10,000 个文档、10 MB 快照,每秒少量写入
 - **云原生** - 已使用云对象存储,希望简化架构、不运维数据库
 - **类型安全** - TypeScript 项目,需要完整类型支持
 
-### ⚠️ 当前限制(0.4.0-beta.0)
+### ⚠️ 当前限制(0.4.0)
 
 - **没有事务** - 每次写入只涉及一个文档。
-- **`find` 读取整个集合** - 除 `{ id }` 查询外,每次 `find` 都会列出并读取集合中的每个文档。目前没有基准测试,不承诺容量数字。
+- **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照;超出后查询仍可用但更慢,并记录一次警告。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
+- **查询成本** - S3/OSS 上热查询为 LIST + 1 次快照 GET + 变化文档的 GET;Memory/FileSystem 上每次 `find` 读取每个文件。`{ id }` 查询只读一个文档。
+- **快照包含文档内容** - 已删除文档的内容在快照重写或 `compact()` 之前仍保留在其中。
 - **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛出 `UnsupportedError`;不带 `etag` 的并发更新后写覆盖。
 - **FileSystem 的条件更新仅在单进程内有效**。
 - **0.3.x 与 0.4 不能同时写入同一集合**。
-- **beta** - 暂无 `sort`、`count`、自定义 ID。
+- **功能范围** - 暂无 `sort`、`count`、自定义 ID。
 
-各存储后端的保证详见[核心概念 - 保证与限制](/guide/concepts#保证与限制)。
+各存储后端的保证详见[保证与限制](/guide/guarantees)。
 
 ### ⚡ 核心优势
 
@@ -123,10 +125,10 @@ await users.delete(user.id);
 
 ```bash
 # 安装
-bun add @hold-baby/bucket-db@next
+bun add @hold-baby/bucket-db
 
 # 或使用 npm
-npm install @hold-baby/bucket-db@next
+npm install @hold-baby/bucket-db
 ```
 
 立即查看[快速开始指南](/guide/),5 分钟完成第一个应用。

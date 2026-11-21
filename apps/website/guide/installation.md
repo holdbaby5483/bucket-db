@@ -7,8 +7,8 @@
 - **Node.js** 20+ 或 **Bun**
 - **TypeScript** 5.0+（推荐）
 
-::: tip 0.4.0-beta.0
-当前版本为 beta，发布在 npm 的 `next` 标签下，安装时需要写 `@next`（不带标签安装的是 0.3.x）。从 0.3.x 升级请阅读[升级指南](./migration)。
+::: tip 0.4.0
+当前版本为 0.4.0。从 0.3.x 升级请阅读[升级指南](./migration)。
 :::
 
 ## 包管理器
@@ -16,25 +16,25 @@
 ### 使用 Bun（推荐）
 
 ```bash
-bun add @hold-baby/bucket-db@next
+bun add @hold-baby/bucket-db
 ```
 
 ### 使用 npm
 
 ```bash
-npm install @hold-baby/bucket-db@next
+npm install @hold-baby/bucket-db
 ```
 
 ### 使用 yarn
 
 ```bash
-yarn add @hold-baby/bucket-db@next
+yarn add @hold-baby/bucket-db
 ```
 
 ### 使用 pnpm
 
 ```bash
-pnpm add @hold-baby/bucket-db@next
+pnpm add @hold-baby/bucket-db
 ```
 
 ## 依赖说明

@@ -113,7 +113,7 @@ import type { Collection, UpdateDocument } from '@hold-baby/bucket-db';
 ## 分页模式
 
 ::: tip 分页成本
-`offset` / `limit` 在读取并过滤全部文档之后才应用：除 `{ id: '...' }` 外，每次 `find` 都会列出并读取集合中的所有文档，翻到第几页请求数都一样。结果按 ID（随机 UUID）排序，不是插入顺序；目前不支持 `sort` 和 `count`。BucketDB 面向小集合（数千条文档）。
+`offset` / `limit` 在读取并过滤之后才应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。结果按 ID（随机 UUID）排序，不是插入顺序；目前不支持 `sort` 和 `count`。每个集合的容量范围为 10,000 个文档、10 MB 快照。
 :::
 
 ### 基础分页
@@ -311,7 +311,7 @@ app.get('/users', async (req, res) => {
 
 ### 应用侧内存缓存层
 
-BucketDB 本身不缓存查询结果，每次调用都会访问存储。如有需要，可以在应用里自行包一层缓存（注意：多实例部署时各实例缓存互不感知）：
+BucketDB 本身不缓存查询结果，每次 `find` 都会先列出存储（S3/OSS 上的快照只是减少读取，不会跳过 LIST）。如有需要，可以在应用里自行包一层缓存（注意：多实例部署时各实例缓存互不感知）：
 
 ```typescript
 class CachedCollection<T extends Document> {

@@ -6,7 +6,7 @@ BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何�
 
 ::: warning 使用前请阅读
 - OSS 不支持条件更新：带 `etag` 的 `update` 会抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。需要乐观锁请使用 S3。
-- 除 `{ id: '...' }` 外，每次 `find` 都会列出并读取集合中的全部文档。适合小集合（数千条文档）和每秒少量写入。
+- 除 `{ id: '...' }` 外，`find` 使用集合的查询快照 `_snapshot.v1.json`：热查询为 LIST + 1 次快照 GET + 变化过的文档。每个集合的容量范围为 10,000 个文档、10 MB 快照。
 
 完整说明见[核心概念](/guide/concepts)。
 :::
@@ -276,7 +276,7 @@ await Promise.all(newUsers.map((u) => users.insert(u)));
 
 ### 5. 分页
 
-`offset` / `limit` 在读取全部文档并过滤之后才应用，翻页不会减少请求数：
+`offset` / `limit` 在过滤之后才应用，翻页不会减少请求数：
 
 ```typescript
 const page1 = await users.find({}, { limit: 20, offset: 0 });
@@ -284,14 +284,33 @@ const page1 = await users.find({}, { limit: 20, offset: 0 });
 
 结果按 ID（随机 UUID）排序，不是插入顺序；目前没有 `sort`。
 
+### 6. 查询快照、`compact()` 与日志
+
+S3/OSS 上每个集合有一个快照 `<dbPath>/<collection>/_snapshot.v1.json`。查询先 LIST `docs/`，只使用 etag 一致的快照条目，因此快照缺失或过期只影响速度，不影响结果。变化的文档超过 16 个时查询会顺带重写快照。
+
+- **只读凭证**可以直接使用：快照写入第一次遇到 401/403 后，该 `Collection` 实例不再尝试写入，查询照常工作（变化的文档会被逐个读取）。
+- **删除敏感数据后调用 `compact()`**：已删除文档的内容会留在快照中，直到快照被重写；`compact()` 立即用当前文档重建快照，失败时抛出。
+- **日志**：快照写入失败（`error`）和超出容量范围（`warn`）不会抛出，而是交给 `logger`：
+
+```typescript
+const db = new BucketDB(adapter, 'my-app', {
+  logger: (event) => console.error(`[bucket-db] ${event.level}: ${event.message}`, event.error ?? '')
+});
+
+await db.collection('users').delete(userId);
+await db.collection('users').compact();
+```
+
+实测（见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)）：热 `find` 在 100 / 1,000 / 10,000 个文档时 OSS 为 0.11 / 0.27 / 1.35 秒，S3（ap-southeast-2，RTT 约 200 ms）为 0.45 / 1.0 / 3.2 秒；10,000 个文档没有快照的冷查询 OSS 34 秒、S3 134 秒。
+
 ## 剩余限制
 
 1. 没有事务；每次写入只涉及一个文档。
-2. 暂无基准测试（计划在 0.4.0 提供）。除 `{ id }` 外，每次 `find` 都会列出并读取集合中的全部文档，适合小集合（数千条文档）和每秒少量写入。
+2. 容量范围：每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。
 3. OSS：不支持条件更新，带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
 4. FileSystem：条件更新和并发更新合并只在单进程内有效。
 5. 0.3.x 和 0.4 客户端不能同时写同一个集合（0.3 只读取自己的索引，看不到 0.4 的写入）。详见[迁移指南](/guide/migration)。
-6. beta：0.4.0 正式版之前 API 仍可能变化（暂不支持 `sort`、`count`、自定义 ID）。
+6. 快照包含文档内容；结果集不是某一时刻的快照。暂不支持 `sort`、`count`、自定义 ID。详见[保证与限制](/guide/guarantees)。
 
 ## 下一步
 

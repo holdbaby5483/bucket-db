@@ -5,6 +5,27 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-21
+
+Adds the query snapshot: on S3 and OSS a `find` no longer downloads every document. Changes below are relative to 0.4.0-beta.0; upgrading from 0.3.x, read both entries and [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md). 0.4.0 is published as `latest`.
+
+### Added
+
+- Query snapshot for remote backends. `S3Adapter`, `OSSAdapter` and custom adapters with `remote: true` keep `<dbPath>/<collection>/_snapshot.v1.json` next to `docs/`. `find` lists `docs/`, takes each document from the snapshot when its etag equals the listed one and GETs the rest. The list is the authority: a missing, corrupt, stale, foreign-version or concurrently overwritten snapshot changes only speed, never results. A query rewrites the snapshot when more than 16 documents had to be read individually (counting snapshot entries of deleted documents). Memory and FileSystem keep no snapshot. Format: [docs/STORAGE-FORMAT.md](docs/STORAGE-FORMAT.md).
+- `collection.compact()`: rebuilds the snapshot from the current documents, removing the contents of deleted documents. No-op on local backends; throws on failure.
+- `new BucketDB(adapter, dbPath, { logger })` and `Collection`'s optional fourth argument `{ logger }`. The logger (default `console.warn`) receives snapshot write failures (`error`), unparsable snapshots being rebuilt (`warn`) and envelope warnings (`warn`). New exports `BucketDBOptions`, `CollectionOptions`, `Logger`, `LogEvent`.
+- `StorageAdapter.remote` (optional): `true` makes `Collection` keep the query snapshot. `S3Adapter` and `OSSAdapter` set it.
+- Envelope warning: a collection with more than 10,000 documents or a snapshot over 10 MB logs one `warn` per `Collection` instance. Local backends check the document count.
+- Benchmarks: `packages/core/bench/run.ts` and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) with request counts and latency at 100, 1,000 and 10,000 documents on OSS, S3 and FileSystem.
+- Docs: [docs/GUARANTEES.md](docs/GUARANTEES.md) (each guarantee with the test that checks it) and [docs/STORAGE-FORMAT.md](docs/STORAGE-FORMAT.md).
+
+### Changed
+
+- `find` on S3 / OSS costs ⌈N/1000⌉ LIST + 1 GET when the snapshot is current, plus one GET per document changed since it; when more than 16 changed, the query also rewrites the snapshot with one PUT (beta: ⌈N/1000⌉ LIST + N GET). Measured at 10,000 documents: 1.35 s on OSS and 3.2 s on S3 with a current snapshot; 34 s and 134 s without one (the beta's cost plus the snapshot GET and PUT). `{ id }` queries, writes, and `find` on Memory / FileSystem are unchanged.
+- A failure to read the snapshot other than not-found (transient, permission) fails `find` with `StorageError`. A failure to write it does not fail `find`; it is logged, and after a 401 / 403 the collection stops trying, so read-only credentials work.
+- Consistency is stated explicitly: every document `find` returns is a committed version, but the result set is not a point-in-time snapshot of the collection. Deleted documents' contents remain in the snapshot until it is rewritten or `compact()` runs.
+- Installation: `npm install @hold-baby/bucket-db` (no `@next`).
+
 ## [0.4.0-beta.0] - 2026-11-21
 
 Rewrites the storage core. Each document is one object, `<dbPath>/<collection>/docs/<id>.json`, with no index and no write-ahead log; every write is a single storage request. The S3 / OSS client is built in, and the package has no runtime dependencies. 0.4 reads 0.3 collections without conversion. See [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md) for the upgrade steps.

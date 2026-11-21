@@ -1,6 +1,6 @@
 # BucketDB API Reference
 
-Complete API documentation for BucketDB v0.4.0-beta.0. Upgrading from 0.3.x: see [MIGRATION-0.4.md](./MIGRATION-0.4.md).
+Complete API documentation for BucketDB v0.4.0. Upgrading from 0.3.x: see [MIGRATION-0.4.md](./MIGRATION-0.4.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
 
 ## Table of Contents
 
@@ -18,12 +18,13 @@ Complete API documentation for BucketDB v0.4.0-beta.0. Upgrading from 0.3.x: see
 - [Error Classes](#error-classes)
 - [Query Operators](#query-operators)
 - [Performance and Cost Model](#performance-and-cost-model)
+  - [Query snapshot](#query-snapshot)
 
 ---
 
 ## Status and Limitations
 
-0.4.0-beta.0 stores each document as one object, `<dbPath>/<collection>/docs/<id>.json`, and makes every write a single storage request. What each backend guarantees:
+0.4.0 stores each document as one object, `<dbPath>/<collection>/docs/<id>.json`, and makes every write a single storage request. On S3 and OSS each collection also keeps a disposable query snapshot, `<dbPath>/<collection>/_snapshot.v1.json` (see [Query snapshot](#query-snapshot)). What each backend guarantees:
 
 | | Memory | FileSystem | S3 | OSS |
 |---|---|---|---|---|
@@ -32,16 +33,18 @@ Complete API documentation for BucketDB v0.4.0-beta.0. Upgrading from 0.3.x: see
 | Conditional update (`etag`) | yes | single process only | yes | no — `UnsupportedError` |
 | Concurrent partial updates all apply | yes | single process | yes | no (last writer wins) |
 
-Multiple writer processes are supported for `insert` and `delete` on every backend, and for `update` on S3 (on Memory and FileSystem, within one process). In a test, 4 processes each inserting 25 documents left all 100 visible on FileSystem, S3 and OSS.
+Multiple writer processes are supported for `insert` and `delete` on every backend, and for `update` on S3 (on Memory and FileSystem, within one process). In a test, 4 processes each inserting 25 documents left all 100 visible on FileSystem, S3 and OSS. [GUARANTEES.md](./GUARANTEES.md) names the test behind each guarantee.
 
 Remaining limits:
 
 1. **No transactions.** Each write touches one document.
-2. **Every `find` reads every document.** Only a `{ id: '...' }` filter reads a single document. No benchmarks exist yet (planned for 0.4.0) and no capacity is claimed; BucketDB is meant for small collections (thousands of documents) and a few writes per second. See [Performance and Cost Model](#performance-and-cost-model).
-3. **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins.
-4. **FileSystem conditional updates are single-process.** `etag` checks and the merging of concurrent `update`s hold only among writers in one process.
-5. **0.3.x and 0.4 must not write the same collection concurrently.** 0.3 reads only its own index and does not see 0.4 writes.
-6. **Beta.** The API may still change before 0.4.0.
+2. **Envelope: at most 10,000 documents and 10 MB of snapshot per collection.** Past either, queries keep working but get slower, and the collection logs one warning. Measured at 10,000 documents: a `find` takes 1.35 s on OSS, 3.2 s on S3 and about 0.5 s on FileSystem ([BENCHMARKS.md](./BENCHMARKS.md)). See [Performance and Cost Model](#performance-and-cost-model).
+3. **Queries list the whole collection.** `find` filters in memory; `limit` and `offset` do not reduce reads. Only a `{ id: '...' }` filter reads a single document.
+4. **Results are not a point-in-time snapshot.** Every returned document is a version that was committed, but documents written while a query runs may or may not be included.
+5. **The snapshot holds document contents.** A deleted document's contents remain in the snapshot until it is rewritten or [`compact()`](#compact-promisevoid) runs.
+6. **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins.
+7. **FileSystem conditional updates are single-process.** `etag` checks and the merging of concurrent `update`s hold only among writers in one process.
+8. **0.3.x and 0.4 must not write the same collection concurrently.** 0.3 reads only its own index and does not see 0.4 writes.
 
 ---
 
@@ -54,12 +57,18 @@ Entry point: a storage backend plus a key prefix.
 #### Constructor
 
 ```typescript
-new BucketDB(adapter: StorageAdapter, dbPath: string)
+new BucketDB(adapter: StorageAdapter, dbPath: string, options?: BucketDBOptions)
+
+interface BucketDBOptions {
+  /** Receives snapshot write failures and envelope warnings. Default: console.warn. */
+  logger?: Logger;
+}
 ```
 
 **Parameters:**
 - `adapter` - Storage adapter instance (`MemoryStorageAdapter`, `FileSystemAdapter`, `S3Adapter`, `OSSAdapter`, or your own `StorageAdapter`)
 - `dbPath` - Key prefix for this database (e.g. `'my-app'`, `'tenants/123'`). Each `/`-separated segment must be 1–255 letters, digits, `_`, `-` or `.`, not starting with `.`. `''` stores collections at the bucket root.
+- `options.logger` - Receives problems that do not fail the current call (`LogEvent`, see Type Definitions): a snapshot that could not be written (`error`), a snapshot that could not be parsed and is being rebuilt (`warn`), a collection past the envelope (`warn`, once per collection). Default: writes `[bucket-db] <message>` to `console.warn`. Passed to every collection of this `BucketDB`.
 
 **Throws:**
 - `ValidationError` (synchronously) - `dbPath` is invalid
@@ -69,6 +78,11 @@ new BucketDB(adapter: StorageAdapter, dbPath: string)
 import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const db = new BucketDB(new FileSystemAdapter({ basePath: './data' }), 'my-app');
+
+// Route BucketDB's warnings into your own logger
+const logged = new BucketDB(adapter, 'my-app', {
+  logger: ({ level, message, error }) => myLogger[level](message, error),
+});
 ```
 
 #### Methods
@@ -99,9 +113,11 @@ const users = db.collection<User>('users');
 
 ### Collection<T>
 
-Type-safe collection for CRUD operations. Each document is stored as `<dbPath>/<collection>/docs/<id>.json`; the body is the document without `_etag`. On read, `id` comes from the object key and `_etag` from the storage service, whatever the body says, so a JSON object file placed at `docs/<id>.json` by other means is a document too.
+Type-safe collection for CRUD operations. Each document is stored as `<dbPath>/<collection>/docs/<id>.json`; the body is the document without `_etag`. On read, `id` comes from the object key and `_etag` from the storage service, whatever the body says, so a JSON object file placed at `docs/<id>.json` by other means is a document too. On remote backends (S3, OSS, custom adapters with `remote: true`) the collection also keeps a query snapshot, `<dbPath>/<collection>/_snapshot.v1.json`. The full format is in [STORAGE-FORMAT.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md).
 
 Document IDs passed to `findById`, `update` and `delete` follow the same rules as collection names; an invalid ID rejects with `ValidationError`.
+
+Get collections through `db.collection(name)`. The class is also exported; its constructor is `new Collection<T>(adapter, dbPath, name, options?: CollectionOptions)` with `CollectionOptions = { logger?: Logger }`, the same option `BucketDB` passes on.
 
 #### Methods
 
@@ -156,11 +172,16 @@ Query documents with a filter.
 
 **Returns:** Array of matching documents in key order, which is document-ID order (not insertion order). `offset` / `limit` apply after filtering.
 
-**Cost:** Lists `docs/` (one LIST per 1000 documents), reads every document (16 GETs in parallel), then filters in memory. A filter whose `id` is a plain string (`{ id: '...' }`) reads that one document instead. Results are not cached.
+**Cost:** A filter whose `id` is a plain string (`{ id: '...' }`) reads that one document (1 GET). Any other filter lists `docs/` (one LIST per 1000 documents) and filters in memory; how document bodies are read depends on the backend:
+
+- **S3 / OSS** (`remote: true`): one GET of the snapshot; each listed document whose etag matches its snapshot entry is taken from the snapshot, every other one is read with a GET (16 in parallel). When more than 16 documents had to be read individually, counting snapshot entries of deleted documents too, the query rewrites the snapshot with one PUT. A warm query is therefore ⌈N/1000⌉ LIST + 1 GET.
+- **Memory / FileSystem**: every document is read (16 GETs in parallel). No snapshot.
+
+The list is the authority: the snapshot never adds, removes or changes a document in the result, whether it is missing, corrupt, stale, from another format version or overwritten by a concurrent writer. Every returned document is a committed version, but the result is not a point-in-time snapshot of the collection. There is no result cache. Measured latencies: [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md).
 
 **Throws:**
 - `ValidationError` - Malformed filter: unknown operator, non-array `$in` / `$nin` operand, reserved field name (`constructor`, `__proto__`, `prototype`, `toString`, …), or a comparison between different types
-- `StorageError` - Storage failure, or a file under `docs/` that is not `<id>.json` holding a JSON object (`error.key` names it). Files whose name starts with `.` are ignored; a document deleted between the LIST and its GET is skipped.
+- `StorageError` - Storage failure, or a file under `docs/` that is not `<id>.json` holding a JSON object (`error.key` names it). Files whose name starts with `.` are ignored; a document deleted between the LIST and its GET is skipped. On S3 / OSS, failing to *read* the snapshot for any reason other than its absence (a transient error, a permission error) also throws; the query does not fall back to reading every document. Failing to *write* the snapshot does not throw: it is reported to the logger (level `error`), and after a 401 / 403 the collection stops writing it.
 
 **Example:**
 ```typescript
@@ -233,18 +254,33 @@ Delete a document. One DELETE. Deleting a document that does not exist is not an
 await users.delete('user-123');
 ```
 
+##### `compact(): Promise<void>`
+
+Rebuild the query snapshot from the documents as they are now. On S3 / OSS: lists `docs/`, GETs every document (16 in parallel) and writes the snapshot with one PUT. No-op on Memory and FileSystem, which keep no snapshot.
+
+A query only rewrites the snapshot when more than 16 entries are out of date, so the contents of a few deleted documents can stay in it indefinitely. Call `compact()` after deleting data that must not linger, or to warm the snapshot ahead of the first query.
+
+**Throws:**
+- `StorageError` - Storage failure, including a failed snapshot write (unlike `find`, which only logs it), or a file under `docs/` that is not `<id>.json` holding a JSON object
+
+**Example:**
+```typescript
+await users.delete('user-123');
+await users.compact(); // user-123's contents are gone from _snapshot.v1.json
+```
+
 ---
 
 ## Storage Adapters
 
-All adapters implement the `StorageAdapter` interface. They declare which write conditions they can enforce through `capabilities`, which decides what `Collection` can guarantee:
+All adapters implement the `StorageAdapter` interface. They declare which write conditions they can enforce through `capabilities`, which decides what `Collection` can guarantee, and whether they are `remote`, which decides whether queries keep a snapshot:
 
-| Adapter | `createIfAbsent` | `compareAndSwap` | Retries |
-|---------|------------------|------------------|---------|
-| `MemoryStorageAdapter` | `atomic` | `atomic` | none needed |
-| `FileSystemAdapter` | `atomic` (`link()`, across processes) | `single-process` | none |
-| `S3Adapter` | `atomic` | `atomic` | 3 attempts |
-| `OSSAdapter` | `atomic` (`x-oss-forbid-overwrite`; not enforced on versioned buckets) | `none` | 3 attempts |
+| Adapter | `createIfAbsent` | `compareAndSwap` | `remote` (query snapshot) | Retries |
+|---------|------------------|------------------|---------------------------|---------|
+| `MemoryStorageAdapter` | `atomic` | `atomic` | no | none needed |
+| `FileSystemAdapter` | `atomic` (`link()`, across processes) | `single-process` | no | none |
+| `S3Adapter` | `atomic` | `atomic` | yes | 3 attempts |
+| `OSSAdapter` | `atomic` (`x-oss-forbid-overwrite`; not enforced on versioned buckets) | `none` | yes | 3 attempts |
 
 | | Memory | FileSystem | S3 | OSS |
 |---|---|---|---|---|
@@ -476,6 +512,8 @@ interface ListOptions {
 
 interface StorageAdapter {
   readonly capabilities: Capabilities;
+  /** True when every read is a network round trip; Collection then keeps a query snapshot. */
+  readonly remote?: boolean;
   get(key: string): Promise<{ body: Uint8Array; etag: string }>;
   put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }>;
   delete(key: string): Promise<void>;
@@ -492,6 +530,8 @@ Error contract (`StorageError` with `kind`):
 - a retryable failure that persisted: `transient`; anything else: `permanent`
 
 `Collection` uses `{ ifNoneMatch: '*' }` for `insert` unless `createIfAbsent` is `'none'`, and `{ ifMatch }` for `update` unless `compareAndSwap` is `'none'`. `MemoryStorageAdapter` (`packages/core/src/storage/memory.ts`) is a complete reference implementation in about 50 lines.
+
+**`remote`:** set `readonly remote = true` when each request is a network round trip (as `S3Adapter` and `OSSAdapter` do). `find` then keeps `<dbPath>/<collection>/_snapshot.v1.json` and GETs only the documents whose listed etag differs from the snapshot's, and `compact()` rebuilds it. This relies on the etag contract above: `list` must report, for every key, the same etag `get` returns for the current version, and must reflect completed writes and deletes immediately. Leave `remote` unset (or `false`) for local backends; every `find` then reads every document and `compact()` does nothing.
 
 ---
 
@@ -585,6 +625,43 @@ interface UpdateOptions {
 }
 ```
 
+### BucketDBOptions / CollectionOptions
+
+```typescript
+interface BucketDBOptions {
+  /** Receives snapshot write failures and envelope warnings. Default: console.warn. */
+  logger?: Logger;
+}
+
+interface CollectionOptions {
+  logger?: Logger;
+}
+```
+
+`BucketDBOptions` is the third argument of `new BucketDB`; `BucketDB` passes its `logger` to every collection as `CollectionOptions`.
+
+### Logger / LogEvent
+
+Receives problems that do not fail the current call.
+
+```typescript
+interface LogEvent {
+  level: 'warn' | 'error';
+  message: string;
+  error?: unknown;
+}
+
+type Logger = (event: LogEvent) => void;
+```
+
+| Event | `level` |
+|---|---|
+| A query could not write the snapshot (`error` holds the `StorageError`). After a 401 / 403 the collection stops trying. | `error` |
+| The snapshot is not valid JSON or not a version-1 snapshot; it is rebuilt | `warn` |
+| The collection is past the envelope (more than 10,000 documents, or a snapshot over 10 MB); logged once per `Collection` instance. Local backends check the document count only. | `warn` |
+
+The default logger writes `[bucket-db] <message>` (and `error`, if any) to `console.warn`.
+
 ### Adapter types
 
 `FileSystemAdapterConfig`, `S3AdapterOptions`, `OSSAdapterOptions`, `Credentials` and `CredentialProvider` are described with the storage adapters. `StorageAdapter`, `Capabilities`, `Guarantee`, `WriteCondition`, `ObjectEntry`, `ListPage` and `ListOptions` are described under "Custom adapters" in the storage adapters section.
@@ -663,7 +740,7 @@ try {
 
 ### UnsupportedError
 
-The operation needs a capability the storage backend does not provide. In 0.4.0-beta.0 this is `update` with `etag` on `OSSAdapter`.
+The operation needs a capability the storage backend does not provide. In 0.4.0 this is `update` with `etag` on `OSSAdapter`.
 
 ```typescript
 class UnsupportedError extends BucketDBError {}
@@ -696,7 +773,7 @@ class StorageError extends BucketDBError {
 - `transient`: a retryable failure that persisted after retries
 - `permanent`: anything else (permissions, malformed data, …)
 
-`findById` turns `not-found` into `null`; every other `StorageError` propagates. `find` also throws `StorageError` (with `key`) for a file under `docs/` that is not `<id>.json` holding a JSON object.
+`findById` turns `not-found` into `null`; every other `StorageError` propagates. `find` also throws `StorageError` (with `key`) for a file under `docs/` that is not `<id>.json` holding a JSON object, and, on S3 / OSS, when reading the query snapshot fails for a reason other than `not-found`. A failed snapshot write is not thrown by `find` (it goes to the logger), but is thrown by `compact()`.
 
 ---
 
@@ -798,28 +875,52 @@ async function* paginateUsers(filter: QueryFilter<User>, pageSize = 10) {
 }
 ```
 
-Every page reads the whole collection again; if you need every page, one `find` without `limit` is cheaper.
+Every page lists the whole collection again (and on Memory / FileSystem reads every document again); if you need every page, one `find` without `limit` is cheaper.
 
 ---
 
 ## Performance and Cost Model
 
-No benchmarks exist yet (planned for 0.4.0), and no document-count capacity is claimed. Estimate cost from the requests each operation makes (N = documents in the collection):
+Requests per operation (N = documents in the collection):
 
 | Operation | Requests |
 |---|---|
 | `insert` | 1 conditional PUT |
 | `findById` | 1 GET |
 | `find({ id: '...' })` | 1 GET |
-| `find(filter)` | ⌈N / 1000⌉ LIST + N GET, 16 in parallel |
+| `find(filter)`, S3 / OSS, snapshot current | ⌈N / 1000⌉ LIST + 1 GET |
+| `find(filter)`, S3 / OSS, k documents new or changed since the snapshot | ⌈N / 1000⌉ LIST + 1 GET + k GET (16 in parallel); if k plus the snapshot entries of deleted documents exceeds 16, also 1 PUT rewriting the snapshot |
+| `find(filter)`, S3 / OSS, no usable snapshot | ⌈N / 1000⌉ LIST + 1 GET + N GET + 1 PUT (when N > 16) |
+| `find(filter)`, Memory / FileSystem | ⌈N / 1000⌉ LIST + N GET, 16 in parallel |
 | `update` | 1 GET + 1 PUT (conditional where supported); a conflict without `etag` repeats both, up to 5 more times |
 | `delete` | 1 DELETE |
+| `compact()` | S3 / OSS: ⌈N / 1000⌉ LIST + N GET + 1 PUT; Memory / FileSystem: none |
 
-- Read cost of `find` grows with collection size, regardless of how selective the filter is or what `limit` is.
-- There is no query cache: every call reads storage. Cache results in your application if you query the same data repeatedly.
-- Writes do not depend on collection size.
+Measured with `packages/core/bench/run.ts`, documents of about 450 bytes, from a client about 45 ms from the OSS bucket and 200 ms from the S3 bucket (`ap-southeast-2`). Full tables and method: [BENCHMARKS.md](./BENCHMARKS.md).
 
-BucketDB is meant for small collections (thousands of documents) and a few writes per second.
+| Documents | `find`, OSS | `find`, S3 | `find`, FileSystem | `find` without snapshot, OSS | `find` without snapshot, S3 | Snapshot size |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 0.11 s | 0.45 s | 5 ms | 0.55 s | 2.2 s | 55 kB |
+| 1,000 | 0.27 s | 1.0 s | ~40 ms | 3.5 s | 14 s | 524 kB |
+| 10,000 | 1.35 s | 3.2 s | ~0.5 s | 34 s | 134 s | 5.2 MB |
+
+- Remote query latency is about one round trip per 1,000 documents listed plus the snapshot download. The filter, `limit` and `offset` do not change it.
+- Writes and `findById` are one request each (`update` two), so their latency is one or two round trips at any collection size.
+- There is no result cache: every `find` lists storage first.
+
+**Envelope.** BucketDB is designed for at most 10,000 documents and a 10 MB snapshot per collection, and a few writes per second. Past either limit, queries keep working but keep getting slower, and the collection logs one `warn` through the logger (once per `Collection` instance; local backends check the document count only).
+
+### Query snapshot
+
+On remote backends (`S3Adapter`, `OSSAdapter`, custom adapters with `remote: true`) each collection keeps `<dbPath>/<collection>/_snapshot.v1.json`, a copy of every document body with the etag it had. Format and reader rules: [STORAGE-FORMAT.md](./STORAGE-FORMAT.md).
+
+- **The list is the authority.** A snapshot entry is used only if its etag equals the one LIST reports; entries of deleted documents and unknown IDs are ignored. A missing, corrupt, stale, foreign-version or concurrently overwritten snapshot changes only how many GETs a query makes, never its result.
+- **Rebuilt, not trusted.** A missing or unparsable snapshot is rebuilt by the next query (an unparsable one is logged as `warn`). A transient or permission error while reading it fails the query instead of silently reading every document.
+- **Rewrite threshold: 16.** Up to 16 changed documents cost one extra parallel round of GETs per query and leave the snapshot alone. Beyond that the query rewrites it (one unconditional PUT) and the next query is back to ⌈N / 1000⌉ LIST + 1 GET.
+- **Write failures cost only speed.** A failed snapshot write is logged (`error`) and the query still returns. After a 401 / 403, for example with read-only credentials, the collection stops trying.
+- **Consistency.** Every returned document is a committed version, but the result set is not a point-in-time snapshot of the collection: documents written while the query runs may or may not appear.
+- **Deleted contents linger.** A deleted document's body stays in the snapshot until the snapshot is rewritten. Call `compact()` to remove it right away, for example after deleting personal data.
+- **Lifecycle rules work as a TTL.** Objects that a bucket lifecycle rule expires under `docs/` disappear from LIST, and therefore from results.
 
 ### Choosing an Adapter
 
@@ -839,13 +940,13 @@ See [MIGRATION-0.4.md](./MIGRATION-0.4.md). Data written by 0.3 is read as-is; t
 ### From Other Databases
 
 BucketDB fits:
-- **Small collections** where reading every document per query is acceptable (see [Performance and Cost Model](#performance-and-cost-model))
+- **Small collections** (up to 10,000 documents and 10 MB per collection; see [Performance and Cost Model](#performance-and-cost-model))
 - **Low write rates** (a few writes per second)
 - **Schema-flexible** document storage
 - **Deployments that already use object storage** and want to avoid running a database server
 
 **Not suitable for:**
-- Large collections or selective queries over many documents (there are no indexes)
+- Large collections or selective queries over many documents (there are no indexes; every query lists the whole collection)
 - Write-heavy workloads
 - Multi-document transactions or strong consistency across documents
 - Complex joins or aggregations

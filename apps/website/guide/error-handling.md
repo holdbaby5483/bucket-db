@@ -31,9 +31,16 @@ import {
 |------|------------|----------|
 | `insert` | — | `StorageError` 等 |
 | `findById` | 返回 `null` | 抛出（如 `StorageError`），不会返回 `null` |
-| `find` | — | `ValidationError`（查询条件）、`StorageError` |
+| `find` | — | `ValidationError`（查询条件）、`StorageError`（S3/OSS 上包括读取快照时的暂时性或权限错误） |
 | `update` | `DocumentNotFoundError` | `ConcurrentUpdateError`、`UnsupportedError`、`StorageError` |
 | `delete` | 静默成功（幂等） | `StorageError` |
+| `compact` | — | `StorageError` 等（失败即抛出） |
+
+以下情况**不会抛出**，而是交给 `logger`（见下文[日志记录](#_3-日志记录)）：
+
+- S3/OSS 上查询顺带写快照失败：`level: 'error'`，查询照常返回；遇到 401/403（如只读凭证）后该 `Collection` 实例不再尝试写快照
+- 快照内容无法解析（会被重建）：`level: 'warn'`
+- 集合超出容量范围（10,000 个文档或 10 MB 快照）：每个 `Collection` 实例一次 `level: 'warn'`
 
 ## ValidationError
 
@@ -173,6 +180,7 @@ try {
 - S3 / OSS 请求失败
 - 文件系统权限或 I/O 错误
 - `docs/` 下有不是 `<合法 ID>.json` 或不是 JSON 对象的文件（`find` 抛出，`error.key` 指向该文件）
+- S3 / OSS 上 `find` 读取快照时遇到暂时性错误或权限错误（查询失败，而不是改为逐个读取文档）
 
 **重试行为**：S3 和 OSS 的内置客户端已对每个请求最多尝试 3 次（全抖动指数退避，单次超时 `timeoutMs` 默认 10 000 ms），重试网络错误、超时、5xx（500/502/503/504）、429、`SlowDown`、`RequestTimeout`。其他 4xx 不重试（`kind: 'permanent'`）。因此收到 `kind: 'transient'` 时内部已经重试过，应用层只需决定是否稍后再试。
 
@@ -312,6 +320,23 @@ try {
   logError(error as Error, { operation: 'update', userId: id });
   throw error;
 }
+```
+
+BucketDB 自身的非致命事件（快照写入失败、容量警告）不会抛出，而是交给创建数据库时传入的 `logger`，默认写到 `console.warn`：
+
+```typescript
+import type { LogEvent } from '@hold-baby/bucket-db';
+
+const db = new BucketDB(adapter, 'my-app', {
+  logger: (event: LogEvent) => {
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: event.level,        // 'warn' | 'error'
+      message: event.message,
+      error: event.error ? String(event.error) : undefined
+    }));
+  }
+});
 ```
 
 ## 最佳实践

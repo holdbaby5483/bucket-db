@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-bun add @hold-baby/bucket-db@next
+bun add @hold-baby/bucket-db
 ```
 
 详见[安装指南](./installation)了解更多安装方式。

@@ -186,12 +186,19 @@ for await (const page of paginateAll({ status: 'active' })) {
 
 ## 查询如何执行
 
-BucketDB 没有索引。`find` 的执行过程是：
+BucketDB 没有索引。`find` 的执行过程取决于后端。
 
-1. LIST 集合的 `docs/` 前缀（每 1000 个文档一次请求）
-2. GET **每一个**文档（最多 16 个并行）
-3. 在内存中过滤
-4. 对过滤后的结果应用 `offset` / `limit`
+**S3 / OSS**（以及 `remote: true` 的自定义适配器）：
+
+1. LIST 集合的 `docs/` 前缀（每 1000 个文档一次请求），得到每个文档的 etag
+2. GET 集合的查询快照 `_snapshot.v1.json`
+3. 快照条目的 etag 与 LIST 一致时直接使用；其余文档（新增、修改过的）逐个 GET（最多 16 个并行）
+4. 在内存中过滤
+5. 对过滤后的结果应用 `offset` / `limit`
+
+逐个读取的文档加上快照中已删除文档的条目超过 16 个时，查询会顺带重写快照。LIST 始终是权威来源，快照缺失或过期只影响速度，不影响结果。详见[核心概念 - 快照](./concepts#快照)。
+
+**Memory / FileSystem**：列出 `docs/`，读取**每一个**文件（最多 16 个并行），然后在内存中过滤并应用 `offset` / `limit`。
 
 例外：如果过滤条件中的 `id` 是一个普通字符串（`{ id: '...' }`），只读取这一个文档。
 
@@ -235,7 +242,7 @@ try {
 
 ### 1. 能按 ID 查就按 ID 查
 
-只有 `id` 等值条件能避免读取整个集合；其他任何条件（包括空过滤）都会读取集合中的每个文档：
+只有 `id` 等值条件能在所有后端上只读取一个文档；其他任何条件（包括空过滤）都要处理集合中的每个文档：
 
 ```typescript
 // ✅ 1 次 GET
@@ -244,24 +251,24 @@ const user = await collection.findById('user-123');
 // ✅ 只读取这一个文档
 const users = await collection.find({ id: 'user-123' });
 
-// ⚠️ LIST + 读取集合中的每个文档，再在内存中过滤
+// ⚠️ S3/OSS：LIST + 快照 + 变化的文档；Memory/FileSystem：读取每个文件。再在内存中过滤
 const active = await collection.find({ status: 'active' });
 ```
 
 ### 2. 条件越具体，返回越少，但读取量不变
 
-无论条件选择性如何，非 `id` 查询都会读取全部文档。更具体的条件只减少返回给你的结果数量。
+无论条件选择性如何，非 `id` 查询的读取量都一样。更具体的条件只减少返回给你的结果数量。
 
 ### 3. 分页减少返回量，不减少读取量
 
 `offset` / `limit` 在过滤之后应用，所以分页不会减少存储读取：
 
 ```typescript
-// 返回 100 条，但仍读取了集合中的所有文档
+// 返回 100 条，但读取量与不分页时相同
 const page = await collection.find({}, { limit: 100, offset: 0 });
 ```
 
-上面的迭代器模式每一页都会重新读取整个集合。需要遍历全部结果时，直接调用一次 `find` 更省请求。
+上面的迭代器模式每一页都会重新执行一次完整查询（S3/OSS 上每页都要 LIST + GET 快照）。需要遍历全部结果时，直接调用一次 `find` 更省请求。
 
 ### 4. 避免多余条件
 
@@ -281,9 +288,11 @@ const users = await collection.find({
 
 ## 性能提示
 
-- **按 ID 查找** - `findById` 或 `{ id: '...' }` 只读取一个文档；其他任何查询的成本都是 LIST + 读取集合中每个文档
-- **集合规模** - BucketDB 适合小集合（数千个文档）；目前没有基准测试数据
-- **缓存结果** - BucketDB 不缓存，每次 `find` 都读取存储；对频繁查询的结果可在应用层缓存
+- **按 ID 查找** - `findById` 或 `{ id: '...' }` 在所有后端上都只读取一个文档
+- **S3/OSS** - 热查询为 ⌈N/1000⌉ 次 LIST + 1 次快照 GET，加上自快照以来每个变化文档 1 次 GET；变化超过 16 个时还会用 1 次 PUT 重写快照。实测 OSS 热 `find` 在 100 / 1,000 / 10,000 个文档时为 0.11 / 0.27 / 1.35 秒，S3 为 0.45 / 1.0 / 3.2 秒（ap-southeast-2，RTT 约 200 ms）；没有快照的冷查询在 10,000 个文档时 OSS 34 秒、S3 134 秒，见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)
+- **Memory/FileSystem** - 每次 `find` 读取每个文件；FileSystem 在 10,000 个文档时约 0.5 秒
+- **集合规模** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并通过 `logger` 记录一次警告
+- **缓存结果** - BucketDB 不缓存查询结果，每次 `find` 都会先 LIST 存储；对频繁查询的结果可在应用层缓存
 
 ## 类型安全
 
