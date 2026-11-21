@@ -6,6 +6,8 @@ declare module 'ali-oss' {
       accessKeySecret: string;
       bucket: string;
       endpoint?: string;
+      /** Retries for network errors and timeouts only; HTTP error responses are not retried. */
+      retryMax?: number;
     });
 
     get(key: string): Promise<{
