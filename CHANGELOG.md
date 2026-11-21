@@ -5,6 +5,28 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-11-21
+
+Stops silent data loss in the index and stops the docs from over-promising. No API or storage format changes. 0.3.x remains suitable for a single writer only; see "Status and limitations" in the README.
+
+### Fixed
+
+- Concurrent inserts into a new collection no longer lose index entries on S3, FileSystem and Memory: the first write of an index shard is conditional (`ifNoneMatch: '*'`). OSS still emulates conditional writes with HEAD-then-PUT, so concurrent writes on OSS, even from one process, can still lose index entries; issue one write at a time there.
+- An index shard read that fails for any reason other than "not found" now rejects the operation with `StorageError`. Previously it was treated as an empty shard and the following write dropped every entry in that shard.
+- Retries now run. S3 uses the AWS SDK default retry strategy (3 attempts: 5xx, throttling, network errors). OSS sets ali-oss `retryMax: 2`, which retries network errors and timeouts only; 5xx and 429 responses are not retried. The custom retry wrappers never retried anything and are removed.
+- `update` throws `ConcurrentUpdateError` when another writer changes the document between its read and its write; previously it threw `StorageError`. S3 `409 ConditionalRequestConflict` is recognised as a conflict alongside `412 PreconditionFailed`.
+
+### Removed
+
+- In-process query result cache. It returned stale results across instances for up to 5 minutes and handed out shared objects that callers could mutate. Every `find` now reads storage.
+
+### Changed
+
+- Documentation: removed "production" labels and million-document scale claims, corrected the error table and test count, and documented the limitations: single writer only, the WAL provides no recovery guarantee, OSS has no atomic conditional writes.
+- Added the MIT `LICENSE` file, also shipped in the npm package.
+- Publish workflow runs the test suite before publishing and no longer prints part of the npm token.
+- Removed 32 compiled test files that inflated test counts, and untracked 18 files matched by `.gitignore`.
+
 ## [0.3.1] - 2026-04-12
 
 ### Added
@@ -73,4 +95,4 @@ If you only used `@hold-baby/bucket-db`, no changes needed!
 - Sharded index design for scalability
 - Multi-tenant isolation via dbPath
 - Full TypeScript support with strict type safety
-- Comprehensive test suite (132 tests)
+- Test suite
