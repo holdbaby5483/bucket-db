@@ -71,6 +71,18 @@ jobs:
       - name: Run the built package on Node
         run: node packages/core/scripts/node-smoke.mjs
 
+      - name: Run the built CLI on Node
+        env:
+          BUCKET_DB_URL: file://${{ runner.temp }}/cli-smoke
+        run: |
+          cli="node packages/core/dist/cli.js"
+          echo '{"ms":42}' | $cli put runs sha-1
+          test "$($cli count runs '{"ms":{"$gt":10}}')" = 1
+          $cli export runs | $cli import copy
+          $cli get copy sha-1 | grep -q '"ms":42'
+          $cli doctor
+          if $cli get runs missing; then exit 1; else test $? -eq 2; fi
+
   local-s3:
     name: Conformance on a local S3 (SeaweedFS)
     runs-on: ubuntu-latest
