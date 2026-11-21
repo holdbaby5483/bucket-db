@@ -12,7 +12,6 @@ import { DocumentNotFoundError, ConcurrentUpdateError, StorageError } from '../t
 import { ShardManager } from '../index/shard-manager.js';
 import { sanitizePathComponent, safePathJoin } from '../utils/path-validator.js';
 import { WAL, type WALEntry } from './wal.js';
-import { LRUCache } from '../cache/lru-cache.js';
 
 /**
  * Generate UUID v4
@@ -38,7 +37,6 @@ export interface CollectionOptions {
 export class Collection<T extends Document> implements ICollection<T> {
   private shardManager: ShardManager;
   private wal: WAL;
-  private queryCache: LRUCache<T[]>;
   private basePath: string;
 
   constructor(
@@ -56,7 +54,6 @@ export class Collection<T extends Document> implements ICollection<T> {
       options.shardCount || 16
     );
     this.wal = new WAL(adapter, this.basePath);
-    this.queryCache = new LRUCache<T[]>(100, 5 * 60 * 1000); // 100 entries, 5 min TTL
 
     // Recover from any pending WAL entries
     this.recoverFromWAL().catch(err => {
@@ -123,9 +120,6 @@ export class Collection<T extends Document> implements ICollection<T> {
       // 4. Clear WAL entry after successful completion
       await this.wal.clear(id);
 
-      // 5. Invalidate query cache (new document may match existing queries)
-      this.queryCache.invalidate();
-
       return document;
     } catch (error) {
       // On failure, WAL entry remains for recovery
@@ -145,13 +139,6 @@ export class Collection<T extends Document> implements ICollection<T> {
   }
 
   async find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]> {
-    // Check cache first
-    const cacheKey = LRUCache.generateKey(filter as Record<string, any>, options as Record<string, any>);
-    const cached = this.queryCache.get(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
     // Query index to get matching document IDs
     const indexResults = await this.shardManager.query(filter);
 
@@ -179,9 +166,6 @@ export class Collection<T extends Document> implements ICollection<T> {
       doc._etag = obj.etag;
       return doc;
     });
-
-    // Cache the results
-    this.queryCache.set(cacheKey, results);
 
     return results;
   }
@@ -242,9 +226,6 @@ export class Collection<T extends Document> implements ICollection<T> {
     // 4. Clear WAL entry
     await this.wal.clear(id);
 
-    // 5. Invalidate query cache (document changed)
-    this.queryCache.invalidate();
-
     return updated;
   }
 
@@ -272,9 +253,6 @@ export class Collection<T extends Document> implements ICollection<T> {
 
       // 4. Clear WAL entry
       await this.wal.clear(id);
-
-      // 5. Invalidate query cache (document deleted)
-      this.queryCache.invalidate();
     } catch (error) {
       throw error;
     }
