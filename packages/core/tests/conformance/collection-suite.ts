@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import {
   BucketDB,
   ConcurrentUpdateError,
+  DocumentExistsError,
   DocumentNotFoundError,
   StorageError,
   UnsupportedError,
@@ -273,6 +274,61 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       expect(await rejection(items.find({ constructor: 1 } as QueryFilter<Item>))).toBeInstanceOf(ValidationError);
       expect(await rejection(items.find({ n: { $bad: 1 } } as unknown as QueryFilter<Item>))).toBeInstanceOf(ValidationError);
       expect(calls).toEqual([]);
+    });
+
+    test('D14 put creates or replaces the whole document in one unconditional write', async () => {
+      const { storage, calls } = counted(adapter);
+      const items = new BucketDB(storage, dbPath).collection<Item>('d14');
+      const first = await items.put('run-42', { n: 1, s: 'a', extra: true });
+      expect(calls).toEqual(['put']);
+      const second = await items.put('run-42', { n: 2, s: 'b' });
+      expect(await items.findById('run-42')).toEqual(second);
+      expect(second).not.toHaveProperty('extra');
+      expect(second._etag).not.toBe(first._etag);
+      await items.put('run-42', { n: 2, s: 'b' }); // repeating is harmless
+      expect(await items.count()).toBe(1);
+    });
+
+    test('D15 insert with an explicit id creates once, then throws DocumentExistsError', async () => {
+      const items = db.collection<Item>('d15');
+      const doc = await items.insert({ n: 1, s: 'a' }, { id: 'sha-abc123' });
+      expect(doc.id).toBe('sha-abc123');
+      expect(await rejection(items.insert({ n: 2, s: 'b' }, { id: 'sha-abc123' }))).toBeInstanceOf(DocumentExistsError);
+      expect((await items.findById('sha-abc123'))!.n).toBe(1);
+      const racers = await Promise.allSettled([1, 2, 3, 4, 5].map(n => items.insert({ n, s: 'r' }, { id: 'race' })));
+      expect(racers.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(await rejection(items.insert({ n: 1, s: 'a' }, { id: 'a/b' }))).toBeInstanceOf(ValidationError);
+    });
+
+    test('D16 count without a filter only lists; with a filter it counts matches', async () => {
+      const { storage, calls } = counted(adapter);
+      const items = new BucketDB(storage, dbPath).collection<Item>('d16');
+      await Promise.all([1, 2, 3].map(n => items.insert({ n, s: n === 1 ? 'x' : 'y' })));
+      calls.length = 0;
+      expect(await items.count()).toBe(3);
+      expect(calls.every(operation => operation === 'list')).toBe(true);
+      expect(await items.count({ s: 'y' })).toBe(2);
+    });
+
+    test('D17 deleteMany deletes the matches and reports how many', async () => {
+      const items = db.collection<Item>('d17');
+      await Promise.all([1, 2, 3, 4, 5].map(n => items.insert({ n, s: 'z' })));
+      expect(await items.deleteMany({ n: { $lte: 3 } })).toBe(3);
+      expect((await items.find({})).map(doc => doc.n).sort()).toEqual([4, 5]);
+      expect(await items.deleteMany({ n: 100 })).toBe(0);
+    });
+
+    test('D18 find sorts by _createdAt then id by default, by the given fields otherwise; limit 0 is empty', async () => {
+      const items = db.collection<Item>('d18');
+      for (const n of [3, 1, 2]) {
+        await items.put(`id-${n}`, { n, s: 's' });
+        await Bun.sleep(2); // distinct _createdAt (millisecond resolution)
+      }
+      expect((await items.find({})).map(doc => doc.n)).toEqual([3, 1, 2]);
+      expect((await items.find({}, { sort: { n: 1 } })).map(doc => doc.n)).toEqual([1, 2, 3]);
+      expect((await items.find({}, { sort: { n: -1 }, limit: 2 })).map(doc => doc.n)).toEqual([3, 2]);
+      expect(await items.find({}, { limit: 0 })).toEqual([]);
+      expect(await rejection(items.find({}, { limit: -1 }))).toBeInstanceOf(ValidationError);
     });
 
     test('D13 a collection written by 0.3.x is readable; index/ and wal/ are ignored', async () => {

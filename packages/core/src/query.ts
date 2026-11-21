@@ -38,11 +38,10 @@ export function validateFilter(filter: QueryFilter<unknown>): void {
   }
 }
 
+/** A missing field is `undefined`: it fails `$eq` / ranges / `$in` and satisfies `$ne` / `$nin`. */
 function evaluateCondition(value: unknown, condition: unknown): boolean {
   // a plain value means $eq
-  if (!isOperatorObject(condition)) {
-    return value === condition;
-  }
+  if (!isOperatorObject(condition)) return value === condition;
 
   // all operators must hold
   for (const [operator, operand] of Object.entries(condition)) {
@@ -57,12 +56,8 @@ function evaluateCondition(value: unknown, condition: unknown): boolean {
       case '$gte':
       case '$lt':
       case '$lte': {
-        if (typeof value !== typeof operand) {
-          throw new ValidationError('Type mismatch in comparison operator');
-        }
-        if (typeof value !== 'number' && typeof value !== 'string') {
-          throw new ValidationError('Comparison operators require number or string values');
-        }
+        // only number-to-number and string-to-string comparisons can match
+        if (typeof value !== typeof operand || (typeof value !== 'number' && typeof value !== 'string')) return false;
         const right = operand as typeof value;
         if (operator === '$gt' && !(value > right)) return false;
         if (operator === '$gte' && !(value >= right)) return false;
@@ -70,18 +65,12 @@ function evaluateCondition(value: unknown, condition: unknown): boolean {
         if (operator === '$lte' && !(value <= right)) return false;
         break;
       }
-      case '$in': {
-        const values = operand as unknown[];
-        if (values.length === 0 || !values.includes(value)) return false;
+      case '$in':
+        if (!(operand as unknown[]).includes(value)) return false;
         break;
-      }
-      case '$nin': {
-        const values = operand as unknown[];
-        // 0.3 behaviour, kept until query semantics are settled in M2
-        if (values.length === 0) return true;
-        if (values.includes(value)) return false;
+      case '$nin':
+        if ((operand as unknown[]).includes(value)) return false;
         break;
-      }
     }
   }
   return true;
@@ -93,8 +82,50 @@ function evaluateCondition(value: unknown, condition: unknown): boolean {
  */
 export function evaluateFilter(document: Record<string, unknown>, filter: QueryFilter<unknown>): boolean {
   for (const [field, condition] of Object.entries(filter)) {
-    if (!Object.prototype.hasOwnProperty.call(document, field)) return false;
-    if (!evaluateCondition(document[field], condition)) return false;
+    const value = Object.prototype.hasOwnProperty.call(document, field) ? document[field] : undefined;
+    if (!evaluateCondition(value, condition)) return false;
   }
   return true;
+}
+
+/** booleans < numbers < strings < everything else (compared as JSON) */
+function rank(value: unknown): number {
+  const order = ['boolean', 'number', 'string'].indexOf(typeof value);
+  return order === -1 ? 3 : order;
+}
+
+function compareValues(a: unknown, b: unknown): number {
+  if (rank(a) !== rank(b)) return rank(a) - rank(b);
+  const [left, right] = rank(a) === 3 ? [JSON.stringify(a), JSON.stringify(b)] : [a as string, b as string];
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+export type SortSpec = Record<string, 1 | -1>;
+
+/**
+ * Sorts by the fields of `sort` in order (1 ascending, -1 descending), then by
+ * `_createdAt` and `id`. Missing or null values sort last in either direction.
+ */
+export function sortDocuments<D extends Record<string, unknown>>(documents: D[], sort: SortSpec = {}): D[] {
+  const keys: Array<[string, number]> = Object.entries(sort);
+  for (const [field, direction] of keys) {
+    if (RESERVED_FIELDS.has(field) || (direction !== 1 && direction !== -1)) {
+      throw new ValidationError(`Invalid sort ${JSON.stringify({ [field]: direction })}: use 1 or -1 per field`);
+    }
+  }
+  for (const field of ['_createdAt', 'id']) if (!(field in sort)) keys.push([field, 1]);
+
+  return documents.sort((a, b) => {
+    for (const [field, direction] of keys) {
+      const left = a[field] ?? undefined;
+      const right = b[field] ?? undefined;
+      if (left === undefined || right === undefined) {
+        if (left !== right) return left === undefined ? 1 : -1;
+        continue;
+      }
+      const order = compareValues(left, right) * direction;
+      if (order !== 0) return order;
+    }
+    return 0;
+  });
 }

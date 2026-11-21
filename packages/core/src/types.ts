@@ -37,8 +37,19 @@ export type QueryFilter<T> = {
 };
 
 export interface QueryOptions {
+  /** 0 returns no documents. Default: all. */
   limit?: number;
   offset?: number;
+  /**
+   * Fields to sort by, in order: 1 ascending, -1 descending. Missing values sort
+   * last. Ties, and the default order, are `_createdAt` then `id`.
+   */
+  sort?: Record<string, 1 | -1>;
+}
+
+export interface InsertOptions {
+  /** Use this id instead of a generated one; fails with DocumentExistsError if it is taken. */
+  id?: string;
 }
 
 export interface UpdateOptions {

@@ -1,10 +1,26 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, UpdateOptions, Logger } from './types.js';
+import type {
+  Document,
+  InsertDocument,
+  InsertOptions,
+  UpdateDocument,
+  QueryFilter,
+  QueryOptions,
+  UpdateOptions,
+  Logger,
+} from './types.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { getMany } from './storage/adapter.js';
-import { ConcurrentUpdateError, DocumentNotFoundError, StorageError, UnsupportedError } from './errors.js';
+import {
+  ConcurrentUpdateError,
+  DocumentExistsError,
+  DocumentNotFoundError,
+  StorageError,
+  UnsupportedError,
+  ValidationError,
+} from './errors.js';
 import { docsPrefix, isValidName, validateName } from './keys.js';
-import { evaluateFilter, validateFilter } from './query.js';
+import { evaluateFilter, sortDocuments, validateFilter } from './query.js';
 import { SNAPSHOT_NAME, encodeSnapshot, parseSnapshot, type SnapshotEntry } from './snapshot.js';
 
 /** Conflicting writes an etag-less update retries before giving up. */
@@ -78,13 +94,36 @@ export class Collection<T extends Document> {
     return encoder.encode(JSON.stringify(body));
   }
 
-  /** Creates a document with a generated id. One PUT. */
-  async insert(data: InsertDocument<T>): Promise<T> {
-    const id = crypto.randomUUID();
+  /**
+   * Creates a document. One conditional PUT. With `options.id` the call fails
+   * with DocumentExistsError when that id is taken; otherwise an id is generated.
+   */
+  async insert(data: InsertDocument<T>, options: InsertOptions = {}): Promise<T> {
+    const id = options.id ?? crypto.randomUUID();
+    const key = this.keyOf(id);
+    const atomic = this.adapter.capabilities.createIfAbsent !== 'none';
+    if (options.id !== undefined && !atomic) {
+      throw new UnsupportedError('This storage backend cannot create a document only if it is absent');
+    }
     const timestamp = new Date().toISOString();
     const document = { ...withoutSystemFields(data), id, _createdAt: timestamp, _updatedAt: timestamp } as T;
-    const condition = this.adapter.capabilities.createIfAbsent === 'none' ? undefined : ({ ifNoneMatch: '*' } as const);
-    const { etag } = await this.adapter.put(this.keyOf(id), this.encode(document), condition);
+    try {
+      const { etag } = await this.adapter.put(key, this.encode(document), atomic ? { ifNoneMatch: '*' } : undefined);
+      return { ...document, _etag: etag };
+    } catch (error) {
+      if (error instanceof StorageError && error.kind === 'conflict') throw new DocumentExistsError(id);
+      throw error;
+    }
+  }
+
+  /**
+   * Creates or replaces the whole document under `id`. One unconditional PUT, so
+   * repeating it is harmless; `_createdAt` is reset, the old document is not read.
+   */
+  async put(id: string, data: InsertDocument<T>): Promise<T> {
+    const timestamp = new Date().toISOString();
+    const document = { ...withoutSystemFields(data), id, _createdAt: timestamp, _updatedAt: timestamp } as T;
+    const { etag } = await this.adapter.put(this.keyOf(id), this.encode(document));
     return { ...document, _etag: etag };
   }
 
@@ -101,11 +140,17 @@ export class Collection<T extends Document> {
   }
 
   /**
-   * Lists the collection, reads every document and filters in memory.
-   * An `id` equality filter reads a single document instead.
+   * Lists the collection, reads the documents (from the snapshot where it is
+   * current) and filters, sorts and pages in memory. An `id` equality filter
+   * reads a single document instead.
    */
   async find(filter: QueryFilter<T> = {}, options: QueryOptions = {}): Promise<T[]> {
     validateFilter(filter);
+    sortDocuments([], options.sort); // validates the sort spec before any request
+    const { offset = 0, limit, sort } = options;
+    if (!Number.isInteger(offset) || offset < 0 || (limit !== undefined && (!Number.isInteger(limit) || limit < 0))) {
+      throw new ValidationError('offset and limit must be non-negative integers');
+    }
 
     let documents: T[];
     if (typeof filter.id === 'string') {
@@ -116,8 +161,26 @@ export class Collection<T extends Document> {
     }
 
     const matched = documents.filter(document => evaluateFilter(document as Record<string, unknown>, filter));
-    const offset = options.offset ?? 0;
-    return options.limit ? matched.slice(offset, offset + options.limit) : matched.slice(offset);
+    sortDocuments(matched as Array<T & Record<string, unknown>>, sort);
+    return matched.slice(offset, limit === undefined ? undefined : offset + limit);
+  }
+
+  /** Without a filter this only lists the collection; with one it is `find(filter).length`. */
+  async count(filter: QueryFilter<T> = {}): Promise<number> {
+    if (Object.keys(filter).length > 0) return (await this.find(filter)).length;
+    return (await this.listDocuments()).length;
+  }
+
+  /**
+   * Deletes every document matching `filter` and returns how many. Not atomic:
+   * documents are deleted one by one, 16 at a time.
+   */
+  async deleteMany(filter: QueryFilter<T>): Promise<number> {
+    const matched = await this.find(filter);
+    for (let start = 0; start < matched.length; start += 16) {
+      await Promise.all(matched.slice(start, start + 16).map(document => this.delete(document.id)));
+    }
+    return matched.length;
   }
 
   private idOf(key: string): string {
@@ -165,12 +228,8 @@ export class Collection<T extends Document> {
     });
   }
 
-  /**
-   * Lists the collection, then takes each document from the snapshot when its
-   * etag still matches and GETs the rest. The list is the authority: the
-   * snapshot never adds, removes or changes a document in the result.
-   */
-  private async readAll(useSnapshot = this.adapter.remote === true): Promise<T[]> {
+  /** Every document key in the collection with its etag, in key order. */
+  private async listDocuments(): Promise<Array<{ key: string; etag: string; id: string }>> {
     const listed: Array<{ key: string; etag: string; id: string }> = [];
     let cursor: string | undefined;
     do {
@@ -181,6 +240,16 @@ export class Collection<T extends Document> {
       }
       cursor = page.cursor;
     } while (cursor);
+    return listed;
+  }
+
+  /**
+   * Lists the collection, then takes each document from the snapshot when its
+   * etag still matches and GETs the rest. The list is the authority: the
+   * snapshot never adds, removes or changes a document in the result.
+   */
+  private async readAll(useSnapshot = this.adapter.remote === true): Promise<T[]> {
+    const listed = await this.listDocuments();
 
     const snapshot = useSnapshot ? await this.readSnapshot() : new Map<string, SnapshotEntry>();
     const documents = new Array<T | undefined>(listed.length);

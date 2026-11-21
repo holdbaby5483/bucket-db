@@ -67,3 +67,12 @@ export class StorageError extends BucketDBError {
     this.status = options.status;
   }
 }
+
+/**
+ * `insert` with an explicit id that is already taken.
+ */
+export class DocumentExistsError extends BucketDBError {
+  constructor(id: string) {
+    super(`Document already exists: ${id}`);
+  }
+}

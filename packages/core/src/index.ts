@@ -27,6 +27,7 @@ export type {
   QueryFilter,
   QueryOptions,
   UpdateOptions,
+  InsertOptions,
   Logger,
   LogEvent,
 } from './types.js';
@@ -35,6 +36,7 @@ export {
   BucketDBError,
   ValidationError,
   DocumentNotFoundError,
+  DocumentExistsError,
   ConcurrentUpdateError,
   UnsupportedError,
   StorageError,
