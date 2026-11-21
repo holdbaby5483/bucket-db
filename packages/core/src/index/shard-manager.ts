@@ -37,7 +37,11 @@ export class ShardManager {
       const { data, etag } = await this.adapter.get(path);
       return { shard: data as IndexShard, etag };
     } catch (error) {
-      // Return empty shard if not found
+      // Only a missing shard is empty. Any other read failure must surface,
+      // or the write that follows would replace the shard and drop its entries.
+      if (!(error instanceof StorageError && error.message.startsWith('Object not found'))) {
+        throw error;
+      }
       return {
         shard: {
           shardId: formatShardId(shardId),
@@ -52,8 +56,8 @@ export class ShardManager {
     const path = this.getShardPath(shardId);
     const metaPath = this.getShardMetadataPath(shardId);
 
-    // Write shard data
-    await this.adapter.put(path, shard, etag ? { ifMatch: etag } : undefined);
+    // Write shard data; creating a shard must not overwrite one another writer just created
+    await this.adapter.put(path, shard, etag ? { ifMatch: etag } : { ifNoneMatch: '*' });
 
     // Write metadata
     const metadata: ShardMetadata = {
