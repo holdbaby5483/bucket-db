@@ -42,13 +42,14 @@ export class MemoryStorageAdapter implements StorageAdapter {
 
   async list(prefix: string, options: ListOptions = {}): Promise<ListPage> {
     const limit = Math.min(options.limit ?? MAX_LIST_LIMIT, MAX_LIST_LIMIT);
-    const keys = [...this.objects.keys()]
-      .filter(key => key.startsWith(prefix) && (options.cursor === undefined || key > options.cursor))
-      .sort();
-    const page = keys.slice(0, limit);
+    const entries = [...this.objects]
+      .filter(([key]) => key.startsWith(prefix) && (options.cursor === undefined || key > options.cursor))
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([key, { etag }]) => ({ key, etag }));
+    const page = entries.slice(0, limit);
     return {
-      entries: page.map(key => ({ key, etag: this.objects.get(key)!.etag })),
-      cursor: keys.length > limit ? page[page.length - 1] : undefined,
+      entries: page,
+      cursor: entries.length > limit ? page[page.length - 1].key : undefined,
     };
   }
 }

@@ -82,7 +82,7 @@ function evaluateCondition(value: unknown, condition: unknown): boolean {
  */
 export function evaluateFilter(document: Record<string, unknown>, filter: QueryFilter<unknown>): boolean {
   for (const [field, condition] of Object.entries(filter)) {
-    const value = Object.prototype.hasOwnProperty.call(document, field) ? document[field] : undefined;
+    const value = Object.hasOwn(document, field) ? document[field] : undefined;
     if (!evaluateCondition(value, condition)) return false;
   }
   return true;

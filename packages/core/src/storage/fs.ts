@@ -1,5 +1,5 @@
-import { mkdir, open, link, rename, unlink, readdir, writeFile, stat } from 'node:fs/promises';
-import type { BigIntStats } from 'node:fs';
+import { mkdir, open, link, rename, unlink, readdir, writeFile, stat, type FileHandle } from 'node:fs/promises';
+import type { BigIntStats, Dirent } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { StorageAdapter, Capabilities, WriteCondition, ListOptions, ListPage } from './adapter.js';
@@ -39,7 +39,12 @@ export class FileSystemAdapter implements StorageAdapter {
 
   private pathOf(key: string): string {
     const segments = key.split('/');
-    if (segments.some(segment => segment === '' || segment === '.' || segment === '..' || segment.includes('\\') || isInternalFile(segment))) {
+    if (
+      segments.some(
+        segment =>
+          segment === '' || segment === '.' || segment === '..' || segment.includes('\\') || isInternalFile(segment)
+      )
+    ) {
       throw new StorageError(`Invalid key: ${key}`, { key });
     }
     return join(this.basePath, ...segments);
@@ -62,7 +67,7 @@ export class FileSystemAdapter implements StorageAdapter {
 
   async get(key: string): Promise<{ body: Uint8Array; etag: string }> {
     const path = this.pathOf(key);
-    let handle;
+    let handle: FileHandle;
     try {
       handle = await open(path, 'r');
     } catch (error) {
@@ -145,7 +150,7 @@ export class FileSystemAdapter implements StorageAdapter {
     const directory = prefix.slice(0, slash + 1);
     const keys: string[] = [];
     const walk = async (keyPrefix: string): Promise<void> => {
-      let entries;
+      let entries: Dirent[];
       try {
         entries = await readdir(join(this.basePath, ...keyPrefix.split('/').filter(Boolean)), { withFileTypes: true });
       } catch (error) {
@@ -156,7 +161,7 @@ export class FileSystemAdapter implements StorageAdapter {
       for (const entry of entries) {
         const key = keyPrefix + entry.name;
         if (entry.isDirectory()) {
-          if (prefix.startsWith(key + '/') || (key + '/').startsWith(prefix)) await walk(key + '/');
+          if (prefix.startsWith(`${key}/`) || `${key}/`.startsWith(prefix)) await walk(`${key}/`);
         } else if (entry.isFile() && !isInternalFile(entry.name) && key.startsWith(prefix)) {
           if (options.cursor === undefined || key > options.cursor) keys.push(key);
         }

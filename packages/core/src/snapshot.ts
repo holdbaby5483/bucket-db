@@ -46,7 +46,7 @@ export function encodeSnapshot(documents: Document[]): Uint8Array {
   // null prototype: `__proto__` is a valid document id
   const entries: Record<string, SnapshotEntry> = Object.create(null);
   for (const { id, _etag, ...body } of documents) {
-    entries[id] = { etag: _etag!, body: body as Record<string, unknown> };
+    entries[id] = { etag: _etag ?? '', body: body as Record<string, unknown> };
   }
   return encoder.encode(JSON.stringify({ format: FORMAT, version: 1, documents: entries }));
 }

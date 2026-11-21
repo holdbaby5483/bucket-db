@@ -196,7 +196,8 @@ export class Collection<T extends Document> {
     try {
       const { body } = await this.adapter.get(this.snapshotKey);
       const entries = parseSnapshot(body);
-      if (!entries) this.logger({ level: 'warn', message: `${this.snapshotKey} is not a valid snapshot; rebuilding it` });
+      if (!entries)
+        this.logger({ level: 'warn', message: `${this.snapshotKey} is not a valid snapshot; rebuilding it` });
       return entries ?? new Map();
     } catch (error) {
       // a missing snapshot is rebuilt; any other read failure fails the query
@@ -214,8 +215,13 @@ export class Collection<T extends Document> {
       await this.adapter.put(this.snapshotKey, body);
     } catch (error) {
       if (throwOnError) throw error;
-      if (error instanceof StorageError && (error.status === 401 || error.status === 403)) this.snapshotWritable = false;
-      this.logger({ level: 'error', message: `Failed to write ${this.snapshotKey}; queries stay correct but slower`, error });
+      if (error instanceof StorageError && (error.status === 401 || error.status === 403))
+        this.snapshotWritable = false;
+      this.logger({
+        level: 'error',
+        message: `Failed to write ${this.snapshotKey}; queries stay correct but slower`,
+        error,
+      });
     }
   }
 
@@ -262,7 +268,10 @@ export class Collection<T extends Document> {
       else missing.push(index);
     });
 
-    const fetched = await getMany(this.adapter, missing.map(index => listed[index].key));
+    const fetched = await getMany(
+      this.adapter,
+      missing.map(index => listed[index].key)
+    );
     fetched.forEach((result, position) => {
       if ('error' in result) {
         if (result.error.kind === 'not-found') return; // deleted after the list
@@ -323,7 +332,8 @@ export class Collection<T extends Document> {
         _updatedAt: new Date().toISOString(),
       } as T;
       try {
-        const { etag } = await this.adapter.put(key, this.encode(updated), compareAndSwap ? { ifMatch: current._etag! } : undefined);
+        const condition = compareAndSwap ? { ifMatch: current._etag ?? '' } : undefined;
+        const { etag } = await this.adapter.put(key, this.encode(updated), condition);
         return { ...updated, _etag: etag };
       } catch (error) {
         if (!(error instanceof StorageError)) throw error;
