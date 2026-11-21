@@ -34,6 +34,18 @@ interface User extends Document {
 ### 2. 创建数据库实例
 
 ```typescript
+import { BucketDB } from '@hold-baby/bucket-db';
+
+// 连接字符串:file://、s3://、oss://、memory://
+const db = BucketDB.connect('file://./my-database');
+
+// 不传参数时读取环境变量 BUCKET_DB_URL
+// const db = BucketDB.connect();
+```
+
+`BucketDB.connect()` 是同步的,按 URL 选择存储适配器,详见[安装指南](./installation#连接字符串)。原来的写法仍然可用:
+
+```typescript
 import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
 
 const db = new BucketDB(
@@ -77,7 +89,20 @@ console.log(alice);
 // }
 ```
 
-系统字段会自动添加到返回的文档中。每个文档存为一个对象:`my-app/users/docs/<id>.json`。
+系统字段会自动添加到返回的文档中。每个文档存为一个对象:`<dbPath>/users/docs/<id>.json`。
+
+已知 ID 时可以指定 ID,或用 `put` 创建或替换:
+
+```typescript
+// 指定 ID 创建;ID 已存在时抛出 DocumentExistsError
+await users.insert(
+  { name: 'Carol', age: 41, email: 'carol@example.com', status: 'active' },
+  { id: 'carol' }
+);
+
+// 创建或替换整个文档,重复执行结果相同
+await users.put('carol', { name: 'Carol', age: 42, email: 'carol@example.com', status: 'active' });
+```
 
 ### 5. 查询文档
 
@@ -97,9 +122,16 @@ const results = await users.find({
   age: { $gte: 18, $lt: 65 }
 });
 
-// 分页查询
+// 分页查询(默认按 _createdAt、再按 id 升序)
 const page1 = await users.find({}, { limit: 10, offset: 0 });
 const page2 = await users.find({}, { limit: 10, offset: 10 });
+
+// 排序:年龄降序,同龄按名字升序
+const sorted = await users.find({}, { sort: { age: -1, name: 1 } });
+
+// 计数
+const total = await users.count();
+const activeCount = await users.count({ status: 'active' });
 ```
 
 详见[查询语法](./queries)了解所有操作符。
@@ -128,12 +160,16 @@ const locked = await users.update(
 await users.delete(alice.id);
 ```
 
-`delete` 是幂等的:文档不存在时也不会报错。
+`delete` 是幂等的:文档不存在时也不会报错。按条件批量删除用 `deleteMany`(返回匹配数量,不是原子的):
+
+```typescript
+const removed = await users.deleteMany({ status: 'inactive' });
+```
 
 ## 完整示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import { BucketDB } from '@hold-baby/bucket-db';
 import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
@@ -144,11 +180,7 @@ interface User extends Document {
 }
 
 async function main() {
-  // 1. 创建数据库
-  const db = new BucketDB(
-    new FileSystemAdapter({ basePath: './my-database' }),
-    'my-app'
-  );
+  const db = BucketDB.connect('file://./my-database');
 
   // 2. 获取集合
   const users = db.collection<User>('users');
@@ -183,9 +215,9 @@ async function main() {
   await users.delete(bob.id);
   console.log('Deleted Bob');
 
-  // 7. 最终查询
-  const finalUsers = await users.find({});
-  console.log(`Final user count: ${finalUsers.length}`);
+  // 7. 最终计数
+  const finalCount = await users.count();
+  console.log(`Final user count: ${finalCount}`);
 }
 
 main().catch(console.error);
@@ -197,4 +229,5 @@ main().catch(console.error);
 - [核心概念](./concepts) - 理解数据库、集合、文档等概念
 - [查询语法](./queries) - 所有查询操作符详解
 - [API 参考](/api/) - 完整的 API 文档
-- [从 0.3 升级](./migration) - 0.3.x 用户的升级指南
+- [命令行](./cli) - 用 `npx @hold-baby/bucket-db` 在终端或 CI 中读写数据
+- [升级指南](./migration) - 从 0.4 或 0.3 升级

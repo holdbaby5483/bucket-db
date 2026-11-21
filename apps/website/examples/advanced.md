@@ -113,7 +113,7 @@ import type { Collection, UpdateDocument } from '@hold-baby/bucket-db';
 ## 分页模式
 
 ::: tip 分页成本
-`offset` / `limit` 在读取并过滤之后才应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。结果按 ID（随机 UUID）排序，不是插入顺序；目前不支持 `sort` 和 `count`。每个集合的容量范围为 10,000 个文档、10 MB 快照。
+`offset` / `limit` / `sort` 在读取并过滤之后才在内存中应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，分页顺序稳定，大致等于插入顺序；需要其他顺序时传 `sort`，如 `{ sort: { createdAt: -1 } }`。`count()` 不带过滤条件时只列举集合（每 1000 个文档一次 LIST），带过滤条件时成本与 `find` 相同。每个集合的容量范围为 10,000 个文档、10 MB 快照。
 :::
 
 ### 基础分页
@@ -134,7 +134,10 @@ async function paginate<T extends Document>(
   pageSize: number
 ): Promise<PaginatedResult<T>> {
   const offset = (page - 1) * pageSize;
-  const data = await collection.find(filter, { limit: pageSize + 1, offset });
+  const [data, total] = await Promise.all([
+    collection.find(filter, { limit: pageSize + 1, offset, sort: { _createdAt: -1 } }),
+    collection.count(filter),
+  ]);
 
   const hasMore = data.length > pageSize;
   const results = hasMore ? data.slice(0, pageSize) : data;
@@ -143,7 +146,7 @@ async function paginate<T extends Document>(
     data: results,
     page,
     pageSize,
-    total: -1,  // BucketDB 不支持 count，返回 -1
+    total,  // count(filter) 与 find(filter) 成本相同
     hasMore
   };
 }
@@ -367,7 +370,7 @@ const user2 = await cachedUsers.findById('user-123'); // 从缓存
 ## 批量操作模式
 
 ::: warning 并发写入
-所有后端都支持并发 `insert` / `delete`。并发 `update`（不带 `etag`）在 Memory、S3 以及单进程内的 FileSystem 上会自动合并重试；在 OSS 上后写覆盖。没有事务：一批写入中途失败时，已完成的写入不会回滚。
+所有后端都支持并发 `insert` / `put` / `delete`。并发 `update`（不带 `etag`）在 Memory、S3 以及单进程内的 FileSystem 上会自动合并重试；在 OSS 上后写覆盖。没有事务：一批写入中途失败时，已完成的写入不会回滚。
 :::
 
 ### 批量插入
@@ -403,6 +406,29 @@ const inserted = await batchInsert(users, newUsers, 20);
 console.log(`Inserted ${inserted.length} users`);
 ```
 
+### 按已知 key 批量写入
+
+数据本身有稳定的 key（如外部系统 ID、提交 sha）时，用 `put(id, data)`：每次一个无条件 PUT，重复执行只会覆盖，不会产生重复，适合可重试的导入任务。`put` 整体替换文档并重置 `_createdAt`。
+
+```typescript
+await Promise.all(
+  externalUsers.map(u => users.put(`ext-${u.externalId}`, { name: u.name, email: u.email }))
+);
+```
+
+只想在 id 不存在时创建，用 `insert(data, { id })`（一次条件 PUT），id 已被占用时抛出 `DocumentExistsError`：
+
+```typescript
+import { DocumentExistsError } from '@hold-baby/bucket-db';
+
+try {
+  await users.insert({ name: 'Alice', email: 'alice@example.com' }, { id: 'user-alice' });
+} catch (error) {
+  if (!(error instanceof DocumentExistsError)) throw error;
+  // 已存在，跳过
+}
+```
+
 ### 批量更新
 
 ```typescript
@@ -423,6 +449,15 @@ async function batchUpdate<T extends Document>(
 
   return results;
 }
+```
+
+### 批量删除
+
+`deleteMany(filter)` 先执行 `find(filter)`，再以 16 个并发逐个删除匹配的文档，返回匹配数量。它**不是原子操作**：中途失败时已删除的文档不会恢复，调用期间新写入的文档可能不会被删除。
+
+```typescript
+const removed = await users.deleteMany({ status: 'inactive' });
+console.log(`Deleted ${removed} users`);
 ```
 
 ## 软删除模式
@@ -465,6 +500,11 @@ class SoftDeleteCollection<T extends SoftDeletable> {
   async findDeleted(): Promise<T[]> {
     return await this.collection.find({ deleted: true });
   }
+
+  // 永久清除已软删除的文档（deleteMany 非原子）
+  async purge(): Promise<number> {
+    return await this.collection.deleteMany({ deleted: true });
+  }
 }
 
 // 使用
@@ -476,6 +516,8 @@ await softDeleteUsers.softDelete('user-123');  // 软删除
 const active = await softDeleteUsers.find({});  // 不包含已删除
 await softDeleteUsers.restore('user-123');      // 恢复
 ```
+
+`{ deleted: { $ne: true } }` 也会匹配没有 `deleted` 字段的文档（缺失字段对 `$ne` 视为匹配），所以从未软删除过的文档同样会被返回。
 
 ## 审计日志模式
 

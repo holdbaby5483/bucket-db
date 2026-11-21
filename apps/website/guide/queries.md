@@ -184,6 +184,41 @@ for await (const page of paginateAll({ status: 'active' })) {
 }
 ```
 
+`limit: 0` 返回 `[]`。`limit` / `offset` 为负数或小数时抛出 `ValidationError`，不会发出任何存储请求。不传 `sort` 时默认顺序（`_createdAt`、再 `id`）是稳定的，分页结果不会因为再次查询而错乱。
+
+## 排序
+
+`sort` 按顺序列出字段，`1` 为升序，`-1` 为降序：
+
+```typescript
+// 最新的 10 条
+const latest = await collection.find({}, { sort: { _createdAt: -1 }, limit: 10 });
+
+// 先按 status 升序，再按 age 降序
+const users = await collection.find(
+  { age: { $gte: 18 } },
+  { sort: { status: 1, age: -1 } }
+);
+```
+
+- 不传 `sort` 时按 `_createdAt` 升序、再按 `id` 升序，大致是插入顺序。
+- 给定字段都相同时，回退到 `_createdAt`、`id`（升序），除非这两个字段已出现在 `sort` 中。
+- 字段缺失或为 `null` 的文档无论升序还是降序都排在最后；没有 `_createdAt` 的文档（由其他工具写入）在默认顺序中排在最后。
+- 类型不同的值按 布尔 < 数字 < 字符串 < 其他（对象和数组按 JSON 文本比较）排列。
+- `put` 会重置 `_createdAt`，被替换的文档移到默认顺序的末尾。
+- 方向不是 `1` / `-1`，或字段为保留名称（`__proto__`、`constructor` 等）时抛出 `ValidationError`，不会发出任何存储请求。
+- 排序在内存中进行，与 `offset` / `limit` 一样不会减少读取。
+
+## 计数
+
+```typescript
+// 不传条件：只 LIST 集合，不读取文档
+const total = await collection.count();
+
+// 传入条件：成本与 find(filter) 相同
+const active = await collection.count({ status: 'active' });
+```
+
 ## 查询如何执行
 
 BucketDB 没有索引。`find` 的执行过程取决于后端。
@@ -194,35 +229,47 @@ BucketDB 没有索引。`find` 的执行过程取决于后端。
 2. GET 集合的查询快照 `_snapshot.v1.json`
 3. 快照条目的 etag 与 LIST 一致时直接使用；其余文档（新增、修改过的）逐个 GET（最多 16 个并行）
 4. 在内存中过滤
-5. 对过滤后的结果应用 `offset` / `limit`
+5. 对过滤后的结果应用 `sort` / `offset` / `limit`
 
 逐个读取的文档加上快照中已删除文档的条目超过 16 个时，查询会顺带重写快照。LIST 始终是权威来源，快照缺失或过期只影响速度，不影响结果。详见[核心概念 - 快照](./concepts#快照)。
 
-**Memory / FileSystem**：列出 `docs/`，读取**每一个**文件（最多 16 个并行），然后在内存中过滤并应用 `offset` / `limit`。
+**Memory / FileSystem**：列出 `docs/`，读取**每一个**文件（最多 16 个并行），然后在内存中过滤并应用 `sort` / `offset` / `limit`。
 
 例外：如果过滤条件中的 `id` 是一个普通字符串（`{ id: '...' }`），只读取这一个文档。
 
-结果按存储键顺序返回，也就是按 `id` 顺序。自动生成的 ID 是随机 UUID，所以**不是插入顺序**。目前不支持 `sort`，需要排序时请在应用层对结果排序。
+结果默认按 `_createdAt` 升序、再按 `id` 升序返回，见[排序](#排序)。
 
 在 LIST 与 GET 之间被删除的文档会被跳过。
 
 ## 匹配规则
 
 - 多个字段、同一字段的多个操作符之间都是 AND 关系
-- 文档**没有**某个字段时，该字段上的任何条件都不匹配（包括 `$ne` 和 `$nin`）
+- 文档缺少某个字段时，该字段的值按 `undefined` 处理
 - 等值比较使用严格相等（`===`），对象和数组不做深度比较
-- `$in: []` 不匹配任何文档
-- `$nin: []` 匹配所有拥有该字段的文档
-- `$gt` / `$gte` / `$lt` / `$lte` 只比较 number 或 string，且文档值与操作数类型必须一致
+- 类型不同不会报错，只是不匹配（`$ne` / `$nin` 除外，它们匹配）
+
+| 条件 | 字段缺失 | 值的类型不同（如 `"30"` 与 `30`） |
+|------|----------|-----------------------------------|
+| 普通值 / `$eq` | 不匹配 | 不匹配（严格 `===`） |
+| `$ne` | 匹配 | 匹配 |
+| `$gt` `$gte` `$lt` `$lte` | 不匹配 | 不匹配 |
+| `$in` | 不匹配 | 不匹配，除非严格相等 |
+| `$nin` | 匹配 | 匹配 |
+
+- `$gt` / `$gte` / `$lt` / `$lte` 只在 number 与 number、string 与 string 之间比较；其他情况（布尔、`null`、对象、类型不同）都是不匹配，不会报错
+- `$in: []` 不匹配任何文档；`$nin: []` 不排除任何文档，同一字段上的其他操作符照常生效
+- `{ field: null }` 只匹配该字段为 `null` 的文档，不匹配缺少该字段的文档；`{ field: { $ne: null } }` 也会匹配缺少该字段的文档（`undefined !== null`）
+- 没有 `$exists`；需要要求字段存在时，请在代码中过滤
 
 ## 查询校验
 
-以下情况会抛出 `ValidationError`：
+以下情况会在发出任何存储请求之前抛出 `ValidationError`：
 
 - 字段名为保留名称：`__proto__`、`constructor`、`prototype`、`toString`、`valueOf`、`hasOwnProperty`、`isPrototypeOf`、`propertyIsEnumerable`
 - 未知操作符（如 `$regex`）
 - `$in` / `$nin` 的操作数不是数组
-- 比较操作符的类型不匹配（如文档中 `age` 是字符串而查询用数字），或比较的值不是 number / string；这一项在过滤到具体文档时才检查
+- `limit` / `offset` 为负数或小数
+- `sort` 的方向不是 `1` / `-1`，或字段为保留名称
 
 ```typescript
 import { ValidationError } from '@hold-baby/bucket-db';
@@ -261,7 +308,7 @@ const active = await collection.find({ status: 'active' });
 
 ### 3. 分页减少返回量，不减少读取量
 
-`offset` / `limit` 在过滤之后应用，所以分页不会减少存储读取：
+`sort` / `offset` / `limit` 在过滤之后应用，所以分页不会减少存储读取：
 
 ```typescript
 // 返回 100 条，但读取量与不分页时相同

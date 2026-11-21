@@ -1,80 +1,97 @@
 # BucketDB
 
-TypeScript document database (version 0.4.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun.
+TypeScript document database (version 0.5.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun. Includes the `bucket-db` CLI.
 
 ## Key concepts
 
-- `BucketDB` — `new BucketDB(adapter, dbPath, { logger? })`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
+- `BucketDB` — `BucketDB.connect(url?, { logger? })` (url default: env BUCKET_DB_URL) or `new BucketDB(adapter, dbPath, { logger? })`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
+- Connection URLs: `s3://bucket/prefix?region=&endpoint=&forcePathStyle=&timeoutMs=`, `oss://bucket/prefix?region=&endpoint=&timeoutMs=`, `file:///abs/dir` or `file://./rel/dir` (dbPath ''), `memory://prefix`. Path = dbPath. Unknown query parameters → ValidationError. Credentials never in the URL (`user:secret@` is refused); they come from env (AWS_* / OSS_* / ALIBABA_CLOUD_*). Error messages never repeat the URL, so it is safe to log. URL-encode `endpoint` values.
 - `Collection<T>` — typed collection, returned by `db.collection<T>(name)` (same instance per name)
-- Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no result cache.
+- Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no result cache. Format unchanged since 0.4.
 - Query snapshot (S3 / OSS / custom adapters with `remote: true` only): `<dbPath>/<collection>/_snapshot.v1.json` = `{ format: 'bucket-db-snapshot', version: 1, documents: { <id>: { etag, body } } }`. find LISTs docs/, uses a snapshot entry only if its etag equals the listed etag, GETs the rest (16 in parallel). The LIST is the authority: a missing/corrupt/stale/overwritten snapshot only costs speed, never changes results. Rewritten (unconditional PUT) when > 16 documents had to be read individually (+ entries of deleted docs). Memory / FileSystem keep no snapshot.
-- Every document extends `Document`: `id` (UUID, taken from the object key), `_etag` (from storage, not stored in the body), `_createdAt`, `_updatedAt`
+- Every document extends `Document`: `id` (generated UUID unless chosen, taken from the object key), `_etag` (from storage, not stored in the body), `_createdAt`, `_updatedAt`
 - `InsertDocument<T>` and `UpdateDocument<T>` exclude `id`, `_etag`, `_createdAt`, `_updatedAt` (UpdateDocument is also Partial); system fields passed at runtime are dropped
+- put vs insert: `put(id, data)` creates or replaces the whole document (unconditional, idempotent, resets `_createdAt`); `insert(data, { id })` creates only if the id is free, else DocumentExistsError; `insert(data)` generates a UUID.
 - Optimistic locking: `update(id, data, { etag: doc._etag })`; stale etag or lost race throws ConcurrentUpdateError (no retry). Works on Memory, S3, and FileSystem within one process. On OSS, update with etag throws UnsupportedError.
-- update without etag: on Memory / FileSystem (one process) / S3, conflicting writes are retried (up to 5 retries) so concurrent partial updates all apply; on OSS last writer wins.
+- update without etag: on Memory / FileSystem (one process) / S3, conflicting writes are retried (up to 5 retries) so concurrent partial updates all apply; on OSS last writer wins. update keeps `_createdAt`.
 
 ## Guarantees per backend
 
 |                                      | Memory | FileSystem             | S3  | OSS                              |
 |--------------------------------------|--------|------------------------|-----|----------------------------------|
 | single write atomic                  | yes    | yes                    | yes | yes                              |
-| create-if-absent (insert)            | yes    | yes (across processes) | yes | yes (non-versioned buckets only) |
+| create-if-absent (insert, also { id })| yes   | yes (across processes) | yes | yes (non-versioned buckets only) |
 | conditional update (etag)            | yes    | single process only    | yes | no — UnsupportedError            |
 | concurrent partial updates all apply | yes    | single process         | yes | no (last writer wins)            |
 
-Multiple writer processes are supported for insert/delete on every backend and for update on S3 (Memory/FileSystem: within one process).
+Multiple writer processes are supported for insert/put/delete on every backend and for update on S3 (Memory/FileSystem: within one process). put is last-writer-wins everywhere.
 
-## Limitations (0.4.0)
+## Limitations (0.5.0)
 
-- No transactions; each write touches one document.
+- No transactions; each write touches one document. deleteMany is not atomic (one DELETE per match, 16 in parallel; a failure leaves earlier deletes done).
 - Envelope: at most 10,000 documents and 10 MB of snapshot per collection; past it the collection logs one `warn` and queries keep getting slower. Measured warm find at 10,000 docs: OSS 1.35 s, S3 3.2 s, FileSystem ~0.5 s; no snapshot at 10,000 docs: OSS 34 s, S3 134 s (docs/BENCHMARKS.md).
-- find cost on S3/OSS: ⌈N/1000⌉ LIST + 1 GET (snapshot) + 1 GET per document changed since the snapshot (≤ 16), or those GETs + 1 snapshot PUT when more changed. Memory/FileSystem: ⌈N/1000⌉ LIST + N GET. `{ id: '...' }` reads one document. limit/offset do not reduce reads.
+- find cost on S3/OSS: ⌈N/1000⌉ LIST + 1 GET (snapshot) + 1 GET per document changed since the snapshot (≤ 16), or those GETs + 1 snapshot PUT when more changed. Memory/FileSystem: ⌈N/1000⌉ LIST + N GET. `{ id: '...' }` reads one document. sort/limit/offset do not reduce reads. count() without filter: LIST only.
 - Results are not a point-in-time snapshot: each returned document is some committed version.
 - Snapshot read errors other than not-found (transient, permission) fail find with StorageError. Snapshot write failures do not fail find; they go to the logger (level `error`); after 401/403 (read-only credentials) the collection stops writing it.
 - Deleted documents' contents remain in the snapshot until it is rewritten or `compact()` runs.
 - OSS: no conditional update (etag → UnsupportedError); concurrent etag-less updates are last-writer-wins.
 - FileSystem: etag checks / concurrent update merging hold only within one process.
-- 0.3.x and 0.4 clients must not write the same collection concurrently. 0.4 reads 0.3 data as-is; it reads only `docs/` and `_snapshot.v1.json` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted.
+- 0.3.x and 0.4+ clients must not write the same collection concurrently. 0.4+ reads 0.3 data as-is; it reads only `docs/` and `_snapshot.v1.json` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted. 0.4 and 0.5 share the format.
 
 ## Package: @hold-baby/bucket-db
 
 ### Exports
 
 Classes: BucketDB, Collection, MemoryStorageAdapter, FileSystemAdapter, S3Adapter, OSSAdapter
-Errors: BucketDBError, ValidationError, DocumentNotFoundError, ConcurrentUpdateError, UnsupportedError, StorageError
-Types: BucketDBOptions, CollectionOptions, Logger, LogEvent, Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
+Errors: BucketDBError, ValidationError, DocumentNotFoundError, DocumentExistsError, ConcurrentUpdateError, UnsupportedError, StorageError
+Types: BucketDBOptions, CollectionOptions, Logger, LogEvent, Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, InsertOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
+
+### BucketDB API
+
+```
+BucketDB.connect(url?: string, options?: BucketDBOptions): BucketDB    // sync; url default process.env.BUCKET_DB_URL
+new BucketDB(adapter: StorageAdapter, dbPath: string, options?: BucketDBOptions)
+db.collection<T extends Document>(name: string): Collection<T>
+```
 
 ### Collection API
 
 ```
-insert(data: InsertDocument<T>): Promise<T>                 // 1 conditional PUT, generated UUID id
+insert(data: InsertDocument<T>, options?: InsertOptions): Promise<T>  // 1 conditional PUT; generated UUID, or options.id (DocumentExistsError if taken)
+put(id: string, data: InsertDocument<T>): Promise<T>        // 1 unconditional PUT; create or replace whole doc; idempotent; resets _createdAt
 findById(id: string): Promise<T | null>                     // 1 GET; null ONLY if missing, other storage errors throw
-find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + snapshot (S3/OSS) or GET all (local); results in id (key) order
+find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + snapshot (S3/OSS) or GET all (local); default order _createdAt then id
+count(filter?: QueryFilter<T>): Promise<number>             // no filter: LIST only; with filter: like find
 update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>   // GET + conditional PUT
 delete(id: string): Promise<void>                           // 1 DELETE; no error if missing
+deleteMany(filter: QueryFilter<T>): Promise<number>         // find + 1 DELETE per match (16 parallel); NOT atomic; returns count
 compact(): Promise<void>                                    // S3/OSS: rebuild the snapshot (LIST + GET all + PUT), drops deleted docs' contents; throws on failure; no-op locally
 ```
 
 ### Logger
 
 ```
-new BucketDB(adapter, dbPath, { logger: (event: LogEvent) => void })   // default: console.warn
+BucketDB.connect(url, { logger: (event: LogEvent) => void })   // or new BucketDB(adapter, dbPath, { logger }); default: console.warn
 LogEvent = { level: 'warn' | 'error', message: string, error?: unknown }
 ```
 
 Receives: snapshot write failures (error), unparsable snapshot being rebuilt (warn), envelope exceeded (warn, once per collection).
-```
 
-### QueryOptions / UpdateOptions
+### QueryOptions / InsertOptions / UpdateOptions
 
 ```
-{ limit?: number, offset?: number }   // applied after filtering
+{ sort?: Record<string, 1 | -1>, limit?: number, offset?: number }   // filter → sort → offset/limit, in memory
+{ id?: string }
 { etag?: string }
 ```
 
+Order: default `_createdAt` asc then `id` asc (stable pagination); with sort, ties fall back to `_createdAt`, `id`. Missing/null values sort last in either direction. Mixed types: booleans < numbers < strings < others (JSON text). `limit: 0` → []. Negative/fractional limit/offset, sort direction not 1/-1, reserved sort field → ValidationError before any request.
+
 ### Query operators
 
-$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin (fields combined with AND). Unknown operators, non-array $in/$nin, reserved field names (constructor, __proto__, …) throw ValidationError.
+$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin (fields and operators combined with AND).
+Semantics (settled in 0.5): a missing field is `undefined`. Missing field: $eq / plain value / ranges / $in → no match; $ne / $nin → match. Range operators only compare number-number or string-string; any other combination (mismatched types, booleans, null, objects) is no match, never an error. Equality is strict ===. `$in: []` matches nothing; `$nin: []` excludes nothing. `{ f: null }` does not match a missing f; `{ f: { $ne: null } }` does. No $exists.
+Unknown operators, non-array $in/$nin, reserved field names (constructor, __proto__, …) throw ValidationError before any request.
 
 ### Adapters
 
@@ -86,20 +103,40 @@ new OSSAdapter({ bucket, region?, endpoint?, credentials?, timeoutMs? })
 credentials: { accessKeyId, secretAccessKey, sessionToken?, expiresAt? } | (() => Promise<that>)   // provider re-called 5 min before expiresAt
 ```
 
-Custom adapters implement StorageAdapter { capabilities, remote?, get, put, delete, list }; set `remote: true` to get the query snapshot (S3Adapter and OSSAdapter do).
+Custom adapters implement StorageAdapter { capabilities, remote?, get, put, delete, list }; set `remote: true` to get the query snapshot (S3Adapter and OSSAdapter do). insert with { id } needs capabilities.createIfAbsent !== 'none' (else UnsupportedError).
 
 S3 defaults: region AWS_REGION / AWS_DEFAULT_REGION; endpoint AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL / https://s3.<region>.amazonaws.com; credentials AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. Any S3-compatible service via endpoint; only AWS S3 and OSS are tested.
-OSS defaults: region OSS_REGION (`cn-hangzhou`; `oss-cn-hangzhou` also accepted); endpoint https://s3.oss-<region>.aliyuncs.com (S3-compatible; OSS_ENDPOINT is not read); credentials OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SESSION_TOKEN.
+OSS defaults: region OSS_REGION (`cn-hangzhou`; `oss-cn-hangzhou` also accepted); endpoint https://s3.oss-<region>.aliyuncs.com (S3-compatible; OSS_ENDPOINT is not read); credentials OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SESSION_TOKEN, else ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET / ALIBABA_CLOUD_SECURITY_TOKEN (aliyun/configure-aliyun-credentials-action).
 Path-style addressing is automatic for IP/localhost endpoints.
 Retries (S3 and OSS): up to 3 attempts, per-attempt timeout 10 s (timeoutMs), on network errors, timeouts, 5xx, 429, SlowDown, RequestTimeout.
 
 ### Error mapping
 
-ValidationError        — invalid collection name / document ID / dbPath segment / filter; invalid adapter options; missing credentials
+ValidationError        — invalid collection name / document ID / dbPath segment / filter / sort / limit / offset; missing or invalid connection URL (unknown scheme or parameter, no bucket, credentials in URL); invalid adapter options; missing credentials
 DocumentNotFoundError  — update on a missing doc
+DocumentExistsError    — insert with an id that is taken
 ConcurrentUpdateError  — update with stale etag, lost race with etag, or etag-less update retries exhausted
 UnsupportedError       — backend lacks the capability (OSS update with etag)
 StorageError           — storage failure; fields kind ('not-found' | 'conflict' | 'transient' | 'permanent'), key, status. Also thrown by find for a file under docs/ that is not `<id>.json` holding a JSON object (key names the file). Hidden files (starting with `.`) are ignored.
 All extend BucketDBError.
 
 Names: collection names, document IDs and each `/`-separated dbPath segment must match ^[A-Za-z0-9_.-]{1,255}$ and not start with `.`; otherwise ValidationError (never rewritten).
+
+## CLI: bucket-db
+
+```
+npx @hold-baby/bucket-db <command> [arguments] [--url <url>]     # URL from --url or BUCKET_DB_URL
+get <collection> <id>                     # print document; exit 2 if missing
+put <collection> <id> [json]              # create or replace; JSON from argument or stdin
+find <collection> [filter] [--sort field[:asc|:desc]]... [--limit n] [--offset n]   # prints one JSON array
+count <collection> [filter]               # prints a number
+delete <collection> <id>                  # no error if missing
+export <collection>                       # JSON Lines, no _etag
+import <collection> [file]                # JSON Lines from file/stdin; lines with id written in storage format (keeps id + timestamps, overwrites); lines without id inserted; prints count
+compact <collection>                      # rebuild snapshot
+doctor                                    # check backend guarantees; writes only under <prefix>/_doctor-<time>/, cleans up
+```
+
+stdout: one JSON value per line (jq-friendly); errors on stderr prefixed `bucket-db: `. Exit codes: 0 ok, 1 error (incl. a failed doctor check), 2 not found (get). Filters are JSON objects: `'{"ms":{"$lt":100}}'`.
+doctor checks: object round trip; LIST reflects writes/overwrites/deletes immediately with matching etags; create-if-absent with 10 concurrent writers (exactly one wins); compare-and-swap with 10 concurrent writers (skipped where declared none, e.g. OSS). Lines start with `ok`, `skip` or `FAIL`; last line `all checks passed` or `<n> check(s) failed`.
+CI: key records by run (`put runs "$GITHUB_RUN_ID-<shard>"`) so re-runs overwrite; per-job OIDC credentials (AWS_* / ALIBABA_CLOUD_*); recipes in examples/ci/ of the repository.

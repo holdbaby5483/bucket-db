@@ -11,6 +11,7 @@ import {
   BucketDBError,
   ValidationError,
   DocumentNotFoundError,
+  DocumentExistsError,
   ConcurrentUpdateError,
   UnsupportedError,
   StorageError
@@ -19,21 +20,24 @@ import {
 
 | 错误类 | 何时抛出 |
 |--------|----------|
-| `ValidationError` | 非法的集合名、文档 ID、`dbPath`；非法查询条件；比较操作符类型不匹配；适配器配置错误；缺少凭证 |
+| `ValidationError` | 非法的集合名、文档 ID、`dbPath`；非法查询条件或查询选项（`limit` / `offset` / `sort`）；连接字符串错误；适配器配置错误；缺少凭证 |
 | `DocumentNotFoundError` | `update` 的文档不存在（`findById` 返回 `null`，`delete` 静默成功） |
+| `DocumentExistsError` | `insert(data, { id })` 的 ID 已被占用 |
 | `ConcurrentUpdateError` | `etag` 已过期、带 `etag` 的写入输掉竞争，或不带 `etag` 的 `update` 自动重试耗尽 |
-| `UnsupportedError` | 操作需要后端不具备的能力（OSS 上带 `etag` 的 `update`） |
+| `UnsupportedError` | 操作需要后端不具备的能力（OSS 上带 `etag` 的 `update`；`createIfAbsent` 为 `'none'` 的自定义后端上带 `id` 的 `insert`） |
 | `StorageError` | 底层存储失败（S3、OSS、文件系统 I/O），带 `kind` / `key` / `status` |
 
 ## 各操作的错误行为
 
 | 操作 | 文档不存在 | 其他错误 |
 |------|------------|----------|
-| `insert` | — | `StorageError` 等 |
+| `insert` | — | `DocumentExistsError`（指定的 `id` 已存在）、`ValidationError`（非法 `id`）、`StorageError` 等 |
+| `put` | — | `ValidationError`（非法 `id`）、`StorageError` |
 | `findById` | 返回 `null` | 抛出（如 `StorageError`），不会返回 `null` |
-| `find` | — | `ValidationError`（查询条件）、`StorageError`（S3/OSS 上包括读取快照时的暂时性或权限错误） |
+| `find` / `count` | — | `ValidationError`（查询条件或选项）、`StorageError`（S3/OSS 上包括读取快照时的暂时性或权限错误） |
 | `update` | `DocumentNotFoundError` | `ConcurrentUpdateError`、`UnsupportedError`、`StorageError` |
 | `delete` | 静默成功（幂等） | `StorageError` |
+| `deleteMany` | — | `ValidationError`、`StorageError`（中途失败时已完成的删除不会恢复） |
 | `compact` | — | `StorageError` 等（失败即抛出） |
 
 以下情况**不会抛出**，而是交给 `logger`（见下文[日志记录](#_3-日志记录)）：
@@ -49,9 +53,12 @@ import {
 **触发场景**：
 - 集合名、文档 ID 或 `dbPath` 的某一段不匹配 `^[A-Za-z0-9_.-]{1,255}$`，或以 `.` 开头（`dbPath` 为 `''` 表示 bucket 根目录）
 - 查询条件包含保留字段名（`__proto__`、`constructor`、`prototype`、`toString` 等）、未知操作符，或 `$in` / `$nin` 的操作数不是数组
-- 比较操作符（`$gt` 等）的类型不匹配
+- `limit` / `offset` 为负数或小数；`sort` 的方向不是 `1` / `-1` 或字段为保留名称（在发出任何请求之前抛出）
+- 连接字符串错误：没有传 URL 也没有设置 `BUCKET_DB_URL`、不支持的协议、未知参数、s3/oss 缺少 bucket、URL 中包含凭证（错误信息不会重复 URL）
 - 适配器构造参数错误（缺少 bucket / region、endpoint 非法）
 - 缺少凭证（在第一次请求时抛出）
+
+类型不同的比较（如文档中 `age` 是字符串而查询用数字）不会报错，只是不匹配，见[匹配规则](./queries#匹配规则)。
 
 `new BucketDB(...)` 和 `db.collection(name)` 同步抛出；`findById` / `update` / `delete` 遇到非法 ID 时返回 rejected promise。`find({ id: 'bad/id' })` 不报错，返回 `[]`。
 
@@ -78,6 +85,22 @@ try {
 } catch (error) {
   if (error instanceof DocumentNotFoundError) {
     console.log('用户不存在');
+  }
+}
+```
+
+## DocumentExistsError
+
+`insert(data, { id })` 指定的 ID 已被占用时抛出（消息为 `Document already exists: <id>`）。多个进程同时用同一个 ID 插入时，恰好一个成功，其余抛出此错误。需要覆盖而不是报错时使用 `put(id, data)`。
+
+```typescript
+try {
+  await runs.insert({ status: 'started' }, { id: runId });
+} catch (error) {
+  if (error instanceof DocumentExistsError) {
+    console.log('该运行已记录过:', runId);
+  } else {
+    throw error;
   }
 }
 ```
@@ -153,7 +176,7 @@ async function updateWithConfirmation(id: string, updates: UpdateDocument<User>)
 
 ## UnsupportedError
 
-操作需要存储后端不具备的能力时抛出。目前唯一的场景是在 `OSSAdapter` 上调用带 `etag` 的 `update`。
+操作需要存储后端不具备的能力时抛出。内置适配器上唯一的场景是在 `OSSAdapter` 上调用带 `etag` 的 `update`；在 `capabilities.createIfAbsent` 为 `'none'` 的自定义适配器上，带 `id` 的 `insert` 也会抛出。
 
 ```typescript
 try {

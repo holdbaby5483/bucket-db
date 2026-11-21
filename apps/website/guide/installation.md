@@ -7,8 +7,8 @@
 - **Node.js** 20+ 或 **Bun**
 - **TypeScript** 5.0+（推荐）
 
-::: tip 0.4.0
-当前版本为 0.4.0。从 0.3.x 升级请阅读[升级指南](./migration)。
+::: tip 0.5.0
+当前版本为 0.5.0。从 0.4 或 0.3.x 升级请阅读[升级指南](./migration)。
 :::
 
 ## 包管理器
@@ -46,8 +46,35 @@ BucketDB 核心包 (`@hold-baby/bucket-db`) **没有任何运行时依赖**，�
 - FileSystemAdapter（文件系统存储）
 - S3Adapter（AWS S3 及 S3 兼容服务）
 - OSSAdapter（阿里云 OSS）
+- 命令行工具 `bucket-db`（`npx @hold-baby/bucket-db <命令>`，见[命令行](./cli)）
 
 S3 与 OSS 适配器使用内置的 S3 客户端（基于 Web Crypto 的 SigV4 签名），无需安装任何云厂商 SDK。`S3Adapter` 可通过 `endpoint` 连接任意 S3 兼容服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。
+
+## 连接字符串
+
+`BucketDB.connect(url?, options?)` 用一个 URL 选择存储后端并创建数据库实例（同步）。不传 `url` 时读取环境变量 `BUCKET_DB_URL`；两者都没有时抛出 `ValidationError`。命令行工具和 MCP 服务器使用同样的 URL。
+
+```typescript
+import { BucketDB } from '@hold-baby/bucket-db';
+
+const db = BucketDB.connect('s3://my-bucket/my-app?region=us-east-1');
+// 或：export BUCKET_DB_URL=... 后
+const db2 = BucketDB.connect();
+```
+
+| URL | 存储后端 | dbPath |
+|-----|----------|--------|
+| `s3://bucket/prefix?region=…&endpoint=…&forcePathStyle=true&timeoutMs=…` | `S3Adapter` | `prefix`（可含 `/`） |
+| `oss://bucket/prefix?region=…&endpoint=…&timeoutMs=…` | `OSSAdapter` | `prefix` |
+| `file:///absolute/dir` 或 `file://./relative/dir` | `FileSystemAdapter({ basePath: dir })` | `''` |
+| `memory://prefix` | 新的 `MemoryStorageAdapter` | `prefix`（`memory://` 为 `''`） |
+
+- 只接受上表列出的参数；`file://` 和 `memory://` 不接受参数。未知参数、不支持的协议、s3/oss 缺少 bucket 都抛出 `ValidationError`。
+- `endpoint` 的值在查询字符串中需要 URL 编码，例如 `endpoint=http%3A%2F%2Flocalhost%3A9000`。
+- 省略的参数使用下文各适配器的环境变量默认值。
+- 凭证只来自环境变量：S3 为 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`；OSS 为 `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_SESSION_TOKEN`，没有时使用 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `ALIBABA_CLOUD_SECURITY_TOKEN`（`aliyun/configure-aliyun-credentials-action` 通过 OIDC 导出的变量）。
+- URL 不能含凭证：`s3://KEY:SECRET@bucket` 抛出 `ValidationError`，错误信息不会重复 URL，因此 URL 可以安全地打印到日志。
+- 需要显式传入凭证或凭证函数时，直接构造适配器并使用 `new BucketDB(adapter, dbPath, options)`。
 
 ## 云存储配置
 
@@ -94,7 +121,7 @@ const oss = new OSSAdapter({
 |------|------------------|
 | `region` | `OSS_REGION` |
 | `endpoint` | `https://s3.oss-<region>.aliyuncs.com`（OSS 的 S3 兼容 endpoint；不读取 `OSS_ENDPOINT`） |
-| `credentials` | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_SESSION_TOKEN` |
+| `credentials` | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_SESSION_TOKEN`，其次 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `ALIBABA_CLOUD_SECURITY_TOKEN` |
 
 ::: warning OSS 自定义域名
 中国内地新开通的 OSS 用户可能需要通过 `endpoint` 使用自定义域名。通过自定义域名进行 S3 兼容访问目前**未经验证**。

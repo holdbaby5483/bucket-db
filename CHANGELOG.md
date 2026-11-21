@@ -5,6 +5,37 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-21
+
+Makes BucketDB easier to reach for: a connection URL, a `bucket-db` CLI with `doctor`, `put`, `insert` with a chosen id, `sort`, `count` and `deleteMany`, and query semantics that are settled rather than inherited. The storage format is unchanged; 0.4 and 0.5 read and write the same collections. Upgrading from 0.4: [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md).
+
+### BREAKING
+
+- Query semantics are settled. A field missing from a document evaluates as `undefined`. `$gt` / `$gte` / `$lt` / `$lte` on mismatched types, or on values that are not numbers or strings, are no match instead of throwing `ValidationError`. `$ne` and `$nin` now match documents that lack the field (`$eq`, ranges and `$in` still do not). `$nin: []` excludes nothing and no longer skips the other operators on the same field. `$in: []` matches nothing, as before.
+- `find` without `sort` returns documents ordered by `_createdAt`, then `id` (was key / document-ID order). Pages from `offset` / `limit` are stable while the collection is unchanged.
+- `find(filter, { limit: 0 })` returns `[]` (was ignored). A negative or fractional `limit` / `offset` throws `ValidationError` before any request.
+- MCP server 0.2.0 is configured by `BUCKET_DB_URL` plus the usual credential variables. `BUCKET_DB_ADAPTER`, `BUCKET_DB_PATH`, `BUCKET_DB_FS_BASE_PATH`, `BUCKET_DB_S3_*` and `BUCKET_DB_OSS_*` are removed; without `BUCKET_DB_URL` the server exits with a message.
+
+### Added
+
+- `BucketDB.connect(url?, options?)`: opens `s3://bucket/prefix?region=&endpoint=&forcePathStyle=&timeoutMs=`, `oss://bucket/prefix?region=&endpoint=&timeoutMs=`, `file:///abs/dir` or `file://./rel/dir`, and `memory://prefix`; the default URL is `BUCKET_DB_URL`. Unknown query parameters are a `ValidationError`. URLs containing credentials are refused, and error messages never repeat the URL, so it is safe to log.
+- `collection.put(id, data)`: creates or replaces the whole document with one unconditional PUT; idempotent. `_createdAt` is reset because the old document is not read.
+- `collection.insert(data, { id })`: create-if-absent with a chosen id; throws the new `DocumentExistsError` when the id is taken. New exported type `InsertOptions`.
+- `find(filter, { sort: { field: 1 | -1 } })`: sorts by the given fields, then `_createdAt` and `id`. Missing and `null` values sort last in either direction; mixed types order booleans < numbers < strings < others. An invalid sort spec throws `ValidationError` before any request.
+- `collection.count(filter?)`: without a filter only lists the collection (no document reads); with one, the number of matches.
+- `collection.deleteMany(filter)`: deletes the matches one by one, 16 in parallel, and returns how many. Not atomic.
+- `bucket-db` CLI (`npx @hold-baby/bucket-db <command>`, package `bin`): `get`, `put`, `find` (`--sort field[:desc]`, `--limit`, `--offset`), `count`, `delete`, `export` (JSON Lines without `_etag`), `import` (writes the storage format, keeping ids and timestamps), `compact` and `doctor`. URL from `--url` or `BUCKET_DB_URL`; one JSON value per line on stdout, errors on stderr; exit code 0 on success, 1 on error, 2 when `get` finds nothing. Reference: [docs/CLI.md](docs/CLI.md).
+- `bucket-db doctor`: checks an object round trip, LIST consistency after writes, overwrites and deletes (with etags), and create-if-absent and compare-and-swap with 10 concurrent writers (exactly one must win; skipped where the backend declares neither). Writes only under `<prefix>/_doctor-<time>/` and removes it; exits 1 if a check fails. Passes on real AWS S3 and Alibaba Cloud OSS.
+- `OSSAdapter` reads `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `ALIBABA_CLOUD_SECURITY_TOKEN` when the `OSS_*` credential variables are unset (what `aliyun/configure-aliyun-credentials-action` exports after OIDC).
+- MCP tools `db_put` and `db_count`; `db_insert` takes an optional `id`; `db_find` takes `sort`.
+- CI recipes in [`examples/ci/`](examples/ci/): GitHub Actions and GitLab CI jobs with OIDC credentials, least-privilege IAM / RAM policies, an OIDC trust policy and a lifecycle rule. [`.github/workflows/dogfood.yml`](.github/workflows/dogfood.yml) records this repository's benchmark results per commit on OSS with the CLI.
+- Docs: [docs/CLI.md](docs/CLI.md), [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md); new rows in [docs/GUARANTEES.md](docs/GUARANTEES.md) for `put`, `insert` with id, `count`, `deleteMany`, query semantics, connection URLs, the CLI and the MCP server.
+
+### Changed
+
+- `find` validates `sort`, `limit` and `offset`, like the filter, before any storage request.
+- CI runs the built CLI on Node 20 and 22 (`put`, `count`, `export | import`, `get`, `doctor`, exit code 2). `npx` from a packed tarball with an empty cache was checked on Node.
+
 ## [0.4.0] - 2026-11-21
 
 Adds the query snapshot: on S3 and OSS a `find` no longer downloads every document. Changes below are relative to 0.4.0-beta.0; upgrading from 0.3.x, read both entries and [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md). 0.4.0 is published as `latest`.

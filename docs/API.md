@@ -1,13 +1,13 @@
 # BucketDB API Reference
 
-Complete API documentation for BucketDB v0.4.0. Upgrading from 0.3.x: see [MIGRATION-0.4.md](./MIGRATION-0.4.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
+Complete API documentation for BucketDB v0.5.0. Upgrading from 0.4: see [MIGRATION-0.5.md](./MIGRATION-0.5.md); from 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md). The `bucket-db` command line tool is described in [CLI.md](./CLI.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
 
 ## Table of Contents
 
 - [Status and Limitations](#status-and-limitations)
 - [Core Classes](#core-classes)
-  - [BucketDB](#bucketdb)
-  - [Collection](#collection)
+  - [BucketDB](#bucketdb) (including [connection URLs](#connection-urls))
+  - [Collection](#collectiont)
 - [Storage Adapters](#storage-adapters)
   - [MemoryStorageAdapter](#memorystorageadapter)
   - [FileSystemAdapter](#filesystemadapter)
@@ -24,7 +24,7 @@ Complete API documentation for BucketDB v0.4.0. Upgrading from 0.3.x: see [MIGRA
 
 ## Status and Limitations
 
-0.4.0 stores each document as one object, `<dbPath>/<collection>/docs/<id>.json`, and makes every write a single storage request. On S3 and OSS each collection also keeps a disposable query snapshot, `<dbPath>/<collection>/_snapshot.v1.json` (see [Query snapshot](#query-snapshot)). What each backend guarantees:
+BucketDB stores each document as one object, `<dbPath>/<collection>/docs/<id>.json`, and makes every write a single storage request. On S3 and OSS each collection also keeps a disposable query snapshot, `<dbPath>/<collection>/_snapshot.v1.json` (see [Query snapshot](#query-snapshot)). What each backend guarantees:
 
 | | Memory | FileSystem | S3 | OSS |
 |---|---|---|---|---|
@@ -37,9 +37,9 @@ Multiple writer processes are supported for `insert` and `delete` on every backe
 
 Remaining limits:
 
-1. **No transactions.** Each write touches one document.
+1. **No transactions.** Each write touches one document. `deleteMany` deletes its matches one by one; a failure halfway leaves the earlier deletes done.
 2. **Envelope: at most 10,000 documents and 10 MB of snapshot per collection.** Past either, queries keep working but get slower, and the collection logs one warning. Measured at 10,000 documents: a `find` takes 1.35 s on OSS, 3.2 s on S3 and about 0.5 s on FileSystem ([BENCHMARKS.md](./BENCHMARKS.md)). See [Performance and Cost Model](#performance-and-cost-model).
-3. **Queries list the whole collection.** `find` filters in memory; `limit` and `offset` do not reduce reads. Only a `{ id: '...' }` filter reads a single document.
+3. **Queries list the whole collection.** `find` filters, sorts and pages in memory; `sort`, `limit` and `offset` do not reduce reads. Only a `{ id: '...' }` filter reads a single document, and only `count()` without a filter skips reading documents.
 4. **Results are not a point-in-time snapshot.** Every returned document is a version that was committed, but documents written while a query runs may or may not be included.
 5. **The snapshot holds document contents.** A deleted document's contents remain in the snapshot until it is rewritten or [`compact()`](#compact-promisevoid) runs.
 6. **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins.
@@ -85,6 +85,44 @@ const logged = new BucketDB(adapter, 'my-app', {
 });
 ```
 
+#### Static methods
+
+##### `static connect(url?: string, options?: BucketDBOptions): BucketDB`
+
+Open a database from a connection URL instead of constructing an adapter. Synchronous; nothing is requested until the first operation.
+
+**Parameters:**
+- `url` - Connection URL (see below). Default: the `BUCKET_DB_URL` environment variable.
+- `options` - Same as the constructor's `options`
+
+**Throws:**
+- `ValidationError` (synchronously) - No URL and no `BUCKET_DB_URL`; an unsupported scheme; an unknown query parameter; an `s3://` / `oss://` URL without a bucket; a URL containing credentials; an invalid prefix; invalid adapter options (for example no region in the URL or the environment)
+
+**Example:**
+```typescript
+import { BucketDB } from '@hold-baby/bucket-db';
+
+// BUCKET_DB_URL=s3://my-bucket/my-app?region=us-east-1, credentials in AWS_*
+const db = BucketDB.connect();
+
+const local = BucketDB.connect('file://./data');
+const test = BucketDB.connect('memory://');
+```
+
+#### Connection URLs
+
+| URL | Backend | `dbPath` |
+|---|---|---|
+| `s3://bucket/prefix?region=…&endpoint=…&forcePathStyle=true&timeoutMs=…` | `S3Adapter` | `prefix` |
+| `oss://bucket/prefix?region=…&endpoint=…&timeoutMs=…` | `OSSAdapter` | `prefix` |
+| `file:///absolute/dir`, `file://./relative/dir` | `FileSystemAdapter({ basePath: dir })` | `''` |
+| `memory://prefix` | a new `MemoryStorageAdapter` | `prefix` |
+
+- The query parameters are the adapter options of the same name; each is optional and falls back to the adapter's environment default (`AWS_REGION`, `OSS_REGION`, …). Any other parameter is rejected, and `file://` and `memory://` accept none. URL-encode an `endpoint` value (`endpoint=http%3A%2F%2Flocalhost%3A9000`).
+- The prefix may contain `/`; each segment follows the `dbPath` rules. Without a prefix, collections sit at the bucket root.
+- **No credentials in the URL.** `s3://KEY:SECRET@bucket` is refused. Credentials come from the environment: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` for S3; `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`, else `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIBABA_CLOUD_SECURITY_TOKEN` for OSS. Error messages never repeat the URL, so it is safe to log. To pass credentials in code (for example a refreshing provider), construct the adapter and use the constructor.
+- The [CLI](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md) and the MCP server take the same URLs, through `--url` or `BUCKET_DB_URL`.
+
 #### Methods
 
 ##### `collection<T extends Document>(name: string): Collection<T>`
@@ -115,20 +153,27 @@ const users = db.collection<User>('users');
 
 Type-safe collection for CRUD operations. Each document is stored as `<dbPath>/<collection>/docs/<id>.json`; the body is the document without `_etag`. On read, `id` comes from the object key and `_etag` from the storage service, whatever the body says, so a JSON object file placed at `docs/<id>.json` by other means is a document too. On remote backends (S3, OSS, custom adapters with `remote: true`) the collection also keeps a query snapshot, `<dbPath>/<collection>/_snapshot.v1.json`. The full format is in [STORAGE-FORMAT.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md).
 
-Document IDs passed to `findById`, `update` and `delete` follow the same rules as collection names; an invalid ID rejects with `ValidationError`.
+Document IDs passed to `insert` (as `options.id`), `put`, `findById`, `update` and `delete` follow the same rules as collection names; an invalid ID rejects with `ValidationError`.
 
 Get collections through `db.collection(name)`. The class is also exported; its constructor is `new Collection<T>(adapter, dbPath, name, options?: CollectionOptions)` with `CollectionOptions = { logger?: Logger }`, the same option `BucketDB` passes on.
 
 #### Methods
 
-##### `insert(data: InsertDocument<T>): Promise<T>`
+##### `insert(data: InsertDocument<T>, options?: InsertOptions): Promise<T>`
 
-Insert a new document with a generated UUID. One conditional PUT (create-if-absent).
+Create a new document. One conditional PUT (create-if-absent).
 
 **Parameters:**
 - `data` - Document data. `id`, `_etag`, `_createdAt` and `_updatedAt` are excluded by the type and dropped at runtime.
+- `options.id?: string` - Use this ID instead of a generated UUID. The document is created only if no document has that ID; of several concurrent inserts with the same ID exactly one succeeds.
 
-**Returns:** Complete document with system fields
+**Returns:** Complete document with system fields. `_createdAt` and `_updatedAt` are the current time.
+
+**Throws:**
+- `DocumentExistsError` - `options.id` is already taken
+- `UnsupportedError` - `options.id` was given and the backend's `capabilities.createIfAbsent` is `'none'` (no built-in adapter); no request is sent
+- `ValidationError` - `options.id` is invalid
+- `StorageError` - Storage failure
 
 **Example:**
 ```typescript
@@ -137,6 +182,35 @@ const user = await users.insert({
   email: 'alice@example.com',
 });
 // Returns: { id: '...', name: 'Alice', email: '...', _createdAt: '...', _updatedAt: '...', _etag: '...' }
+
+// Claim an ID once
+try {
+  await deploys.insert({ version: '1.4.0' }, { id: 'release-1.4.0' });
+} catch (error) {
+  if (error instanceof DocumentExistsError) console.log('already released');
+}
+```
+
+##### `put(id: string, data: InsertDocument<T>): Promise<T>`
+
+Create or replace the whole document under `id`. One unconditional PUT; the old document is not read. Repeating the same `put` is harmless, which makes it the write to use for records keyed by something you already know (a CI run, a commit, a date) and may write twice.
+
+**Parameters:**
+- `id` - Document ID
+- `data` - The complete new document. Fields of the old document that are not in `data` are gone. System fields are excluded by the type and dropped at runtime.
+
+**Returns:** The stored document. Both `_createdAt` and `_updatedAt` are set to the current time: a replaced document gets a new `_createdAt` (and therefore moves to the end of `find`'s default order). Use `update` to keep `_createdAt` or to merge fields.
+
+**Throws:**
+- `ValidationError` - `id` is invalid
+- `StorageError` - Storage failure
+
+No write condition is used, so `put` behaves the same on every backend, OSS included; concurrent `put`s to one ID are last-writer-wins.
+
+**Example:**
+```typescript
+// A re-run of the same CI job overwrites its record instead of adding a second one
+await runs.put(`${process.env.GITHUB_RUN_ID}-${shard}`, { sha, shard, durationMs });
 ```
 
 ##### `findById(id: string): Promise<T | null>`
@@ -165,22 +239,29 @@ if (user) {
 Query documents with a filter.
 
 **Parameters:**
-- `filter` - Query filter object (default `{}`, all documents)
+- `filter` - Query filter object (default `{}`, all documents). Semantics: [Query Operators](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md#query-operators).
 - `options` - Query options
-  - `limit?: number` - Maximum number of results
+  - `sort?: Record<string, 1 | -1>` - Fields to sort by, most significant first: `1` ascending, `-1` descending
+  - `limit?: number` - Maximum number of results; `0` returns `[]`
   - `offset?: number` - Number of matching results to skip
 
-**Returns:** Array of matching documents in key order, which is document-ID order (not insertion order). `offset` / `limit` apply after filtering.
+**Returns:** Matching documents. Filtering, sorting and paging happen in memory, in that order.
+
+**Order:**
+- Without `sort`, documents are ordered by `_createdAt`, then `id`, both ascending: roughly creation order, and stable, so `offset` / `limit` pages neither skip nor repeat documents while the collection is unchanged.
+- With `sort`, ties fall back to `_createdAt`, then `id` (ascending), unless those fields are part of `sort`.
+- A missing or `null` value sorts last, in either direction. Documents without `_createdAt` (written by other tools) therefore come last in the default order.
+- Values of different types order as booleans < numbers < strings < everything else; objects and arrays compare by their JSON text.
 
 **Cost:** A filter whose `id` is a plain string (`{ id: '...' }`) reads that one document (1 GET). Any other filter lists `docs/` (one LIST per 1000 documents) and filters in memory; how document bodies are read depends on the backend:
 
 - **S3 / OSS** (`remote: true`): one GET of the snapshot; each listed document whose etag matches its snapshot entry is taken from the snapshot, every other one is read with a GET (16 in parallel). When more than 16 documents had to be read individually, counting snapshot entries of deleted documents too, the query rewrites the snapshot with one PUT. A warm query is therefore ⌈N/1000⌉ LIST + 1 GET.
 - **Memory / FileSystem**: every document is read (16 GETs in parallel). No snapshot.
 
-The list is the authority: the snapshot never adds, removes or changes a document in the result, whether it is missing, corrupt, stale, from another format version or overwritten by a concurrent writer. Every returned document is a committed version, but the result is not a point-in-time snapshot of the collection. There is no result cache. Measured latencies: [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md).
+`sort`, `limit` and `offset` do not change the cost. The list is the authority: the snapshot never adds, removes or changes a document in the result, whether it is missing, corrupt, stale, from another format version or overwritten by a concurrent writer. Every returned document is a committed version, but the result is not a point-in-time snapshot of the collection. There is no result cache. Measured latencies: [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md).
 
 **Throws:**
-- `ValidationError` - Malformed filter: unknown operator, non-array `$in` / `$nin` operand, reserved field name (`constructor`, `__proto__`, `prototype`, `toString`, …), or a comparison between different types
+- `ValidationError` - Before any request: malformed filter (unknown operator, non-array `$in` / `$nin` operand, reserved field name such as `constructor`, `__proto__`, `prototype`, `toString`, …); a negative or fractional `limit` / `offset`; a `sort` direction other than `1` / `-1` or a reserved `sort` field. Comparisons between mismatched types never throw; they just do not match.
 - `StorageError` - Storage failure, or a file under `docs/` that is not `<id>.json` holding a JSON object (`error.key` names it). Files whose name starts with `.` are ignored; a document deleted between the LIST and its GET is skipped. On S3 / OSS, failing to *read* the snapshot for any reason other than its absence (a transient error, a permission error) also throws; the query does not fall back to reading every document. Failing to *write* the snapshot does not throw: it is reported to the logger (level `error`), and after a 401 / 403 the collection stops writing it.
 
 **Example:**
@@ -197,9 +278,27 @@ const results = await users.find({
   age: { $gte: 18, $lt: 65 },
 });
 
-// Pagination
+// Sorting: oldest first, then by name
+const byAge = await users.find({}, { sort: { age: -1, name: 1 } });
+
+// Pagination (default order: _createdAt, then id)
 const page1 = await users.find({}, { limit: 10, offset: 0 });
 const page2 = await users.find({}, { limit: 10, offset: 10 });
+
+// The 10 most recent documents
+const latest = await users.find({}, { sort: { _createdAt: -1 }, limit: 10 });
+```
+
+##### `count(filter?: QueryFilter<T>): Promise<number>`
+
+Count documents. Without a filter (or with `{}`) this only lists the collection: ⌈N/1000⌉ LIST, no document reads, no snapshot. With a filter it costs the same as `find(filter)` and returns the number of matches.
+
+**Throws:** As `find`.
+
+**Example:**
+```typescript
+const total = await users.count();
+const active = await users.count({ status: 'active' });
 ```
 
 ##### `update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>`
@@ -253,6 +352,22 @@ Delete a document. One DELETE. Deleting a document that does not exist is not an
 ```typescript
 await users.delete('user-123');
 ```
+
+##### `deleteMany(filter: QueryFilter<T>): Promise<number>`
+
+Delete every document matching `filter` and return how many matched. Runs `find(filter)`, then one DELETE per match, 16 in parallel.
+
+**Not atomic.** Documents are deleted one by one: if a DELETE fails, the call throws and the documents deleted before it stay deleted. A document created or changed to match while the call runs may survive it. `deleteMany({})` deletes the whole collection.
+
+**Throws:** As `find`, plus `StorageError` for a failed DELETE.
+
+**Example:**
+```typescript
+const cutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString();
+const removed = await runs.deleteMany({ _createdAt: { $lt: cutoff } });
+```
+
+On S3 / OSS the deleted documents' contents stay in the query snapshot until it is rewritten; call `compact()` afterwards if they must not linger.
 
 ##### `compact(): Promise<void>`
 
@@ -420,7 +535,7 @@ interface OSSAdapterOptions {
 - `bucket` - Bucket name (required)
 - `region?` - e.g. `'cn-hangzhou'` (the 0.3 form `'oss-cn-hangzhou'` is also accepted). Default: `OSS_REGION`. Missing region throws `ValidationError`.
 - `endpoint?` - S3-compatible endpoint. Default: `https://s3.oss-<region>.aliyuncs.com`. `OSS_ENDPOINT` is not read.
-- `credentials?` - Default: `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`. See [Credentials](#credentials).
+- `credentials?` - Default: `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`; when those are unset, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIBABA_CLOUD_SECURITY_TOKEN` (the names the Alibaba Cloud CLI and `aliyun/configure-aliyun-credentials-action` use, for example after OIDC in CI). See [Credentials](#credentials).
 - `timeoutMs?` - Per-attempt timeout; default `10000`
 
 New OSS users in mainland China may have to access buckets through a custom domain, passed as `endpoint`. S3-compatible access through a custom domain has not been verified.
@@ -605,12 +720,29 @@ type QueryOperator = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '
 
 ### QueryOptions
 
-Query options for pagination.
+Sorting and pagination for `find`.
 
 ```typescript
 interface QueryOptions {
+  /** 0 returns no documents. Default: all. */
   limit?: number;
   offset?: number;
+  /**
+   * Fields to sort by, in order: 1 ascending, -1 descending. Missing values sort
+   * last. Ties, and the default order, are `_createdAt` then `id`.
+   */
+  sort?: Record<string, 1 | -1>;
+}
+```
+
+`limit` and `offset` must be non-negative integers. See `find` for the ordering rules.
+
+### InsertOptions
+
+```typescript
+interface InsertOptions {
+  /** Use this id instead of a generated one; fails with DocumentExistsError if it is taken. */
+  id?: string;
 }
 ```
 
@@ -672,10 +804,11 @@ The default logger writes `[bucket-db] <message>` (and `error`, if any) to `cons
 
 | Error class | When thrown |
 |-------------|-------------|
-| `ValidationError` | Invalid collection name, document ID, `dbPath` or filter; invalid adapter options (missing bucket or region, bad endpoint); missing credentials. |
+| `ValidationError` | Invalid collection name, document ID, `dbPath`, filter, `sort`, `limit` or `offset`; invalid or missing connection URL; invalid adapter options (missing bucket or region, bad endpoint); missing credentials. |
 | `DocumentNotFoundError` | `update` on a missing document. `findById` returns `null` and `delete` succeeds instead. |
+| `DocumentExistsError` | `insert` with an `id` that is already taken. |
 | `ConcurrentUpdateError` | `update` with a stale `etag`, a write that lost a race while an `etag` was given, or an `update` without `etag` that still conflicted after 5 retries. |
-| `UnsupportedError` | The operation needs a capability the backend lacks: `update` with `etag` on OSS. |
+| `UnsupportedError` | The operation needs a capability the backend lacks: `update` with `etag` on OSS; `insert` with `id` on a custom adapter without create-if-absent. |
 | `StorageError` | Storage failure. `kind`, `key` and `status` describe it. |
 
 ### BucketDBError
@@ -690,7 +823,7 @@ class BucketDBError extends Error {
 
 ### ValidationError
 
-Invalid input. Collection names, document IDs and `dbPath` segments must be 1–255 letters, digits, `_`, `-` or `.`, not starting with `.`; they are rejected, never rewritten. Malformed filters (unknown operators, non-array `$in` / `$nin` operands, reserved field names such as `constructor` or `__proto__`, comparison of different types) are rejected too.
+Invalid input. Collection names, document IDs and `dbPath` segments must be 1–255 letters, digits, `_`, `-` or `.`, not starting with `.`; they are rejected, never rewritten. Also rejected before any request: malformed filters (unknown operators, non-array `$in` / `$nin` operands, reserved field names such as `constructor` or `__proto__`), invalid `sort` specs, negative or fractional `limit` / `offset`, and connection URLs that are missing, use an unknown scheme or parameter, lack a bucket or contain credentials. A comparison between values of different types is not an error; it does not match.
 
 ```typescript
 class ValidationError extends BucketDBError {}
@@ -738,9 +871,30 @@ try {
 }
 ```
 
+### DocumentExistsError
+
+Thrown by `insert` when `options.id` is given and a document with that ID already exists, including when another writer created it a moment earlier.
+
+```typescript
+class DocumentExistsError extends BucketDBError {
+  constructor(id: string);
+}
+```
+
+**Example:**
+```typescript
+try {
+  await locks.insert({ owner: hostname }, { id: 'nightly-job' });
+} catch (error) {
+  if (error instanceof DocumentExistsError) {
+    console.log('another runner holds the lock');
+  }
+}
+```
+
 ### UnsupportedError
 
-The operation needs a capability the storage backend does not provide. In 0.4.0 this is `update` with `etag` on `OSSAdapter`.
+The operation needs a capability the storage backend does not provide: `update` with `etag` on `OSSAdapter`, or `insert` with `id` on a custom adapter whose `capabilities.createIfAbsent` is `'none'`.
 
 ```typescript
 class UnsupportedError extends BucketDBError {}
@@ -790,8 +944,6 @@ class StorageError extends BucketDBError {
 | `$lt` | Less than | `{ age: { $lt: 65 } }` |
 | `$lte` | Less than or equal | `{ age: { $lte: 65 } }` |
 
-`$gt` / `$gte` / `$lt` / `$lte` compare numbers or strings; comparing values of different types throws `ValidationError`.
-
 ### Array Operators
 
 | Operator | Description | Example |
@@ -799,11 +951,30 @@ class StorageError extends BucketDBError {
 | `$in` | In array | `{ status: { $in: ['active', 'pending'] } }` |
 | `$nin` | Not in array | `{ status: { $nin: ['deleted', 'banned'] } }` |
 
-The operand must be an array. `$in: []` matches nothing; `$nin: []` matches every document that has the field.
+The operand must be an array.
+
+### Semantics
+
+A field missing from a document evaluates as `undefined`. Equality is strict (`===`): objects and arrays are not compared deeply, and `25` does not equal `'25'`.
+
+| Condition | Field missing | Value of another type (`'30'` vs `30`) |
+|---|---|---|
+| plain value, `$eq` | no match | no match |
+| `$ne` | **match** | match |
+| `$gt`, `$gte`, `$lt`, `$lte` | no match | no match |
+| `$in` | no match | no match |
+| `$nin` | **match** | match |
+
+- Range operators compare only a number with a number or a string with a string (strings by UTF-16 code units, so ISO 8601 timestamps compare chronologically). Any other combination, including booleans, `null`, objects and mixed types, is no match; it never throws.
+- `$in: []` matches nothing. `$nin: []` excludes nothing.
+- `{ field: null }` matches documents whose field is `null`, not documents without the field; `{ field: { $ne: null } }` matches documents without the field too. There is no `$exists`.
+- Filters are validated before any request: unknown operators, non-array `$in` / `$nin` operands and reserved field names (`__proto__`, `constructor`, `prototype`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`) throw `ValidationError`.
+
+These rules were settled in 0.5.0; see [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) for what changed from 0.4.
 
 ### Combined Operators
 
-Multiple operators and fields are combined with AND. A document without the field never matches a condition on it.
+Multiple operators and fields are combined with AND; every operator on a field must hold.
 
 ```typescript
 // Age between 18 and 65
@@ -816,6 +987,9 @@ await users.find({
   status: 'active',
   age: { $gte: 18 },
 });
+
+// Not archived, including documents that have no status field
+await users.find({ status: { $ne: 'archived' } });
 ```
 
 ---
@@ -875,7 +1049,7 @@ async function* paginateUsers(filter: QueryFilter<User>, pageSize = 10) {
 }
 ```
 
-Every page lists the whole collection again (and on Memory / FileSystem reads every document again); if you need every page, one `find` without `limit` is cheaper.
+Without `sort` the order is `_createdAt`, then `id`, so pages are stable while the collection does not change; a document inserted meanwhile lands on the last page. Every page lists the whole collection again (and on Memory / FileSystem reads every document again); if you need every page, one `find` without `limit` is cheaper. To know how many pages there are, `count(filter)` costs the same as one `find`; `count()` without a filter only lists.
 
 ---
 
@@ -885,7 +1059,8 @@ Requests per operation (N = documents in the collection):
 
 | Operation | Requests |
 |---|---|
-| `insert` | 1 conditional PUT |
+| `insert` (with or without `id`) | 1 conditional PUT |
+| `put` | 1 PUT |
 | `findById` | 1 GET |
 | `find({ id: '...' })` | 1 GET |
 | `find(filter)`, S3 / OSS, snapshot current | ⌈N / 1000⌉ LIST + 1 GET |
@@ -894,6 +1069,9 @@ Requests per operation (N = documents in the collection):
 | `find(filter)`, Memory / FileSystem | ⌈N / 1000⌉ LIST + N GET, 16 in parallel |
 | `update` | 1 GET + 1 PUT (conditional where supported); a conflict without `etag` repeats both, up to 5 more times |
 | `delete` | 1 DELETE |
+| `count()` | ⌈N / 1000⌉ LIST |
+| `count(filter)` | same as `find(filter)` |
+| `deleteMany(filter)` | same as `find(filter)`, plus 1 DELETE per match (16 in parallel) |
 | `compact()` | S3 / OSS: ⌈N / 1000⌉ LIST + N GET + 1 PUT; Memory / FileSystem: none |
 
 Measured with `packages/core/bench/run.ts`, documents of about 450 bytes, from a client about 45 ms from the OSS bucket and 200 ms from the S3 bucket (`ap-southeast-2`). Full tables and method: [BENCHMARKS.md](./BENCHMARKS.md).
@@ -932,6 +1110,10 @@ On remote backends (`S3Adapter`, `OSSAdapter`, custom adapters with `remote: tru
 ---
 
 ## Migration Guide
+
+### From 0.4
+
+See [MIGRATION-0.5.md](./MIGRATION-0.5.md): query semantics for missing fields and mismatched types, the default `find` order, `limit: 0`, and the MCP server's configuration changed. The storage format did not.
 
 ### From 0.3.x
 

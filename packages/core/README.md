@@ -8,7 +8,7 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 
 Each document is one JSON object in your bucket: `<dbPath>/<collection>/docs/<id>.json`. There is no index and no log; every write is a single storage request. On S3 and OSS, queries also keep a disposable snapshot, `<dbPath>/<collection>/_snapshot.v1.json`, so a query does not download every document ([storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md)).
 
-> **0.4.0** rewrites the storage core and adds the query snapshot. Upgrading from 0.3.x? Read the [migration guide](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md).
+> **0.5.0** adds connection URLs (`BucketDB.connect`), the `bucket-db` CLI with `doctor`, `put`, `insert` with a chosen id, `sort`, `count` and `deleteMany`, and settles query semantics. Upgrading from 0.4? Read [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md); from 0.3.x, [MIGRATION-0.4.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md) first.
 
 ## Status and limitations
 
@@ -25,14 +25,14 @@ Multiple writer processes are supported for `insert` and `delete` on every backe
 
 Remaining limits:
 
-- **No transactions.** Each write touches one document.
+- **No transactions.** Each write touches one document. `deleteMany` deletes its matches one by one and is not atomic.
 - **Envelope: at most 10,000 documents and 10 MB of snapshot per collection.** Past either, queries keep working but get slower, and the collection logs one warning. At 10,000 documents a `find` takes about 1.35 s on OSS and 3.2 s on S3, and about 0.5 s on a local FileSystem ([benchmarks](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)). BucketDB is meant for small collections and a few writes per second.
-- **Queries list the whole collection.** `find` lists every document key, then filters in memory; `limit` and `offset` do not reduce reads. On S3 / OSS document bodies come from the snapshot, plus a GET for each document changed since it was written; Memory and FileSystem read every file. Only a `{ id: '...' }` filter reads a single document.
+- **Queries list the whole collection.** `find` lists every document key, then filters, sorts and pages in memory; `sort`, `limit` and `offset` do not reduce reads. On S3 / OSS document bodies come from the snapshot, plus a GET for each document changed since it was written; Memory and FileSystem read every file. Only a `{ id: '...' }` filter reads a single document, and only `count()` without a filter reads no documents.
 - **Results are not a point-in-time snapshot.** Every returned document is a version that was committed, but documents written while a query runs may or may not be included.
 - **The snapshot holds document contents.** A deleted document's contents stay in `_snapshot.v1.json` until the snapshot is rewritten or `compact()` runs. Call `compact()` after deleting privacy-sensitive data.
 - **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins.
 - **FileSystem conditional updates are single-process.** `etag` checks and the merging of concurrent `update`s hold only among writers in one process.
-- **0.3.x and 0.4 must not write the same collection at the same time.** 0.3 reads only its own index and does not see 0.4 writes.
+- **0.3.x and 0.4 or later must not write the same collection at the same time.** 0.3 reads only its own index and does not see later writes.
 
 ## Installation
 
@@ -43,6 +43,41 @@ npm install @hold-baby/bucket-db
 ```
 
 Requires Node.js >= 20 or Bun. No runtime dependencies: the S3 / OSS client is built in.
+
+## Command line
+
+The package includes `bucket-db`, for shells and CI jobs:
+
+```bash
+export BUCKET_DB_URL='s3://my-bucket/ci-data?region=us-east-1'   # credentials from AWS_* variables
+
+npx @hold-baby/bucket-db doctor                                         # check what the bucket guarantees
+echo '{"ms":1234,"ok":true}' | npx @hold-baby/bucket-db put runs run-42 # create or replace
+npx @hold-baby/bucket-db get runs run-42 | jq .ms
+npx @hold-baby/bucket-db find runs '{"ok":true}' --sort ms:desc --limit 5
+npx @hold-baby/bucket-db count runs
+npx @hold-baby/bucket-db export runs > runs.jsonl                       # backup; `import` restores
+```
+
+Commands: `get`, `put`, `find` (`--sort field[:desc]`, `--limit`, `--offset`), `count`, `delete`, `export`, `import`, `compact`, `doctor`. stdout is one JSON value per line, errors go to stderr; exit code 0 on success, 1 on error, 2 when `get` finds nothing. Full reference: [CLI.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md). Recipes for keeping CI data in a bucket with OIDC credentials: [examples/ci](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci).
+
+## Connection URLs
+
+`BucketDB.connect(url?)`, the CLI and the MCP server open a database from one URL, by default the `BUCKET_DB_URL` environment variable:
+
+| URL | Backend | `dbPath` |
+|---|---|---|
+| `s3://bucket/prefix?region=…&endpoint=…&forcePathStyle=true&timeoutMs=…` | `S3Adapter` | `prefix` |
+| `oss://bucket/prefix?region=…&endpoint=…&timeoutMs=…` | `OSSAdapter` | `prefix` |
+| `file:///absolute/dir`, `file://./relative/dir` | `FileSystemAdapter` | `''` |
+| `memory://prefix` | `MemoryStorageAdapter` | `prefix` |
+
+```typescript
+const db = BucketDB.connect('s3://my-bucket/my-app?region=us-east-1');
+const fromEnv = BucketDB.connect(); // BUCKET_DB_URL
+```
+
+Every query parameter is optional and falls back to the adapter's environment default; unknown parameters throw `ValidationError`. Credentials never go in the URL (a URL with `user:secret@` is refused) but come from `AWS_*`, `OSS_*` or `ALIBABA_CLOUD_*` variables (see [Storage Adapters](#storage-adapters)). Error messages never repeat the URL, so it is safe to log. `new BucketDB(adapter, dbPath)` remains available, for example to pass a credential provider.
 
 ## Exports
 
@@ -71,6 +106,7 @@ import type {
   QueryValue,
   QueryFilter,
   QueryOptions,
+  InsertOptions,
   UpdateOptions,
   FileSystemAdapterConfig,
   S3AdapterOptions,
@@ -94,6 +130,7 @@ import {
   BucketDBError,
   ValidationError,
   DocumentNotFoundError,
+  DocumentExistsError,
   ConcurrentUpdateError,
   UnsupportedError,
   StorageError,
@@ -106,7 +143,7 @@ Every document stored in BucketDB has these system fields:
 
 ```typescript
 interface Document {
-  id: string;          // auto-generated UUID; taken from the object key
+  id: string;          // generated UUID unless you choose it (put, insert with { id }); taken from the object key
   _etag?: string;      // version tag from the storage service, for optimistic locking
   _createdAt?: string; // ISO 8601 timestamp
   _updatedAt?: string; // ISO 8601 timestamp
@@ -120,14 +157,14 @@ interface User extends Document {
 }
 ```
 
-`InsertDocument<T>` and `UpdateDocument<T>` both omit `id`, `_etag`, `_createdAt` and `_updatedAt`; `UpdateDocument<T>` also makes every field optional. If system fields are passed at runtime anyway, `insert` and `update` drop them.
+`InsertDocument<T>` and `UpdateDocument<T>` both omit `id`, `_etag`, `_createdAt` and `_updatedAt`; `UpdateDocument<T>` also makes every field optional. If system fields are passed at runtime anyway, `insert`, `put` and `update` drop them.
 
 `_etag` is not stored in the document body: on every read, `id` comes from the object key and `_etag` from the storage service.
 
 ## Quick Start
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import { BucketDB } from '@hold-baby/bucket-db';
 import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
@@ -137,7 +174,8 @@ interface User extends Document {
   status: 'active' | 'inactive';
 }
 
-const db = new BucketDB(new FileSystemAdapter({ basePath: './data' }), 'my-app');
+// Or s3://bucket/prefix?region=…, oss://…, memory://; new BucketDB(adapter, dbPath) also works
+const db = BucketDB.connect('file://./data');
 
 const users = db.collection<User>('users');
 
@@ -150,31 +188,47 @@ const found = await users.findById(user.id);
 
 // Query: filters in memory (on S3 / OSS, document bodies come from the query snapshot)
 const activeUsers = await users.find({ status: 'active' });
-const adults = await users.find({ age: { $gte: 18 } }, { limit: 10, offset: 0 });
+const adults = await users.find({ age: { $gte: 18 } }, { sort: { age: -1 }, limit: 10 });
+const total = await users.count();
+
+// Create or replace under an ID you choose: one unconditional PUT, safe to repeat
+await users.put('alice', { name: 'Alice', age: 25, email: 'alice@example.com', status: 'active' });
+
+// Create only if the ID is free: throws DocumentExistsError otherwise
+await users.insert({ name: 'Bob', age: 31, email: 'bob@example.com', status: 'active' }, { id: 'bob' });
 
 // Update with optimistic locking (not available on OSS, see above)
 const updated = await users.update(user.id, { age: 26 }, { etag: user._etag });
 
 // Delete: one DELETE; no error if the document is already gone
 await users.delete(user.id);
+
+// Delete every match, one DELETE each (not atomic); returns how many
+await users.deleteMany({ status: 'inactive' });
 ```
 
 ## Operations and cost
 
 | Operation | Requests |
 |---|---|
-| `insert(data)` | 1 conditional PUT |
+| `insert(data, { id? })` | 1 conditional PUT |
+| `put(id, data)` | 1 PUT |
 | `findById(id)` | 1 GET |
 | `find({ id: '...' })` | 1 GET |
 | `find(filter)` on S3 / OSS | ⌈N / 1000⌉ LIST + 1 GET (snapshot), plus 1 GET per document changed since the snapshot (up to 16, in parallel) or, when more changed, those GETs and 1 PUT rewriting the snapshot |
 | `find(filter)` on Memory / FileSystem | ⌈N / 1000⌉ LIST + N GET (16 in parallel) |
 | `update(id, data, options?)` | 1 GET + 1 conditional PUT (more on conflict, see below) |
 | `delete(id)` | 1 DELETE |
+| `count()` | ⌈N / 1000⌉ LIST |
+| `count(filter)` | same as `find(filter)` |
+| `deleteMany(filter)` | same as `find(filter)`, plus 1 DELETE per match (16 in parallel) |
 | `compact()` | S3 / OSS: ⌈N / 1000⌉ LIST + N GET + 1 PUT; nothing on Memory / FileSystem |
 
 N = documents in the collection. Measured latencies at 100, 1,000 and 10,000 documents are in [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md).
 
-`find` results are in key order, which is document-ID order (not insertion order). `offset` and `limit` apply after filtering. There is no result cache: every `find` lists storage first.
+Without `sort`, `find` returns documents by `_createdAt`, then `id`: roughly creation order, and stable for paging. `sort: { field: 1 | -1 }` sorts by the given fields first; missing and `null` values sort last in either direction. `sort`, `offset` and `limit` apply after filtering, and `limit: 0` returns `[]`. There is no result cache: every `find` lists storage first.
+
+`put` replaces the whole document and sets both timestamps to now (so it moves to the end of the default order); `update` merges fields and keeps `_createdAt`. `insert` with `{ id }` creates only if the ID is free; of several concurrent inserts with one ID, exactly one succeeds.
 
 `update` merges `data` into the stored document:
 
@@ -230,11 +284,21 @@ await users.find({ status: { $ne: 'inactive' } });
 await users.find({ status: { $in: ['active', 'pending'] } });
 await users.find({ status: { $nin: ['banned', 'deleted'] } });
 
-// Pagination
-await users.find({}, { limit: 20, offset: 40 });
+// Sorting and pagination
+await users.find({ status: 'active' }, { sort: { age: -1, name: 1 }, limit: 20, offset: 40 });
 ```
 
-Conditions on several fields are combined with AND. A malformed filter — an unknown operator, a non-array `$in` / `$nin` operand, or a reserved field name such as `constructor` or `__proto__` — throws `ValidationError`.
+Conditions on several fields are combined with AND. A field missing from a document evaluates as `undefined`:
+
+| Condition | Field missing | Value of another type (`'30'` vs `30`) |
+|---|---|---|
+| plain value, `$eq` | no match | no match |
+| `$ne` | match | match |
+| `$gt`, `$gte`, `$lt`, `$lte` | no match | no match |
+| `$in` | no match | no match |
+| `$nin` | match | match |
+
+Range operators compare only numbers with numbers and strings with strings; anything else is no match, never an error. `$in: []` matches nothing and `$nin: []` excludes nothing. A malformed filter — an unknown operator, a non-array `$in` / `$nin` operand, or a reserved field name such as `constructor` or `__proto__` — throws `ValidationError` before any request, as do an invalid `sort` and a negative or fractional `limit` / `offset`.
 
 ## Error Handling
 
@@ -242,6 +306,7 @@ Conditions on several fields are combined with AND. A malformed filter — an un
 import {
   DocumentNotFoundError,
   ConcurrentUpdateError,
+  DocumentExistsError,
   UnsupportedError,
   ValidationError,
   StorageError,
@@ -271,8 +336,9 @@ try {
 
 | Error class | When thrown |
 |---|---|
-| `ValidationError` | Invalid collection name, document ID, `dbPath` or filter; invalid adapter options; missing credentials |
+| `ValidationError` | Invalid collection name, document ID, `dbPath`, filter, `sort`, `limit` or `offset`; invalid or missing connection URL; invalid adapter options; missing credentials |
 | `DocumentNotFoundError` | `update` on a missing document |
+| `DocumentExistsError` | `insert` with an `id` that is already taken |
 | `ConcurrentUpdateError` | `update` with a stale `etag`, or a write that lost a race (with `etag`, or after 5 retries without) |
 | `UnsupportedError` | The backend lacks the needed capability: `update` with `etag` on OSS |
 | `StorageError` | Storage failure. `kind` is `'not-found'`, `'conflict'`, `'transient'` (still failing after retries) or `'permanent'`; `key` is the object key, `status` the HTTP status |
@@ -365,7 +431,7 @@ const explicit = new OSSAdapter({
 | `bucket` | required |
 | `region` | `OSS_REGION`. Write `cn-hangzhou`; the 0.3 form `oss-cn-hangzhou` is also accepted |
 | `endpoint` | `https://s3.oss-<region>.aliyuncs.com` (OSS's S3-compatible endpoint). `OSS_ENDPOINT` is not read |
-| `credentials` | `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN` |
+| `credentials` | `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`; if unset, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIBABA_CLOUD_SECURITY_TOKEN` (what `aliyun/configure-aliyun-credentials-action` exports after OIDC) |
 | `timeoutMs` | `10000` (per attempt) |
 
 New OSS users in mainland China may have to access buckets through a custom domain, passed as `endpoint`. S3-compatible access through a custom domain has not been verified.
@@ -410,6 +476,7 @@ The function's result is cached; it is called again 5 minutes before `expiresAt`
 
 ```typescript
 new BucketDB(adapter: StorageAdapter, dbPath: string, options?: BucketDBOptions)
+BucketDB.connect(url?: string, options?: BucketDBOptions): BucketDB // see Connection URLs; default BUCKET_DB_URL
 db.collection<T extends Document>(name: string): Collection<T>
 
 interface BucketDBOptions {
@@ -432,7 +499,11 @@ interface LogEvent {
 
 A custom `StorageAdapter` can set `readonly remote = true` to get the query snapshot; the built-in `S3Adapter` and `OSSAdapter` do.
 
-## Upgrading from 0.3.x
+## Upgrading
+
+**From 0.4.** The storage format is unchanged. Queries changed: `$ne` / `$nin` now match documents without the field, range comparisons between mismatched types no longer throw, `find` without `sort` orders by `_createdAt` then `id`, and `limit: 0` returns `[]`. The MCP server is configured by `BUCKET_DB_URL`. Details: [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md).
+
+**From 0.3.x.**
 
 0.4 reads 0.3 collections as they are: `docs/<id>.json` is unchanged. Besides `docs/`, 0.4 reads only its own `_snapshot.v1.json` (S3 / OSS), so the index and log directories 0.3 kept next to `docs/`, and 0.3's `*.meta` files, are ignored and can be deleted. On S3 / OSS, queries create a `_snapshot.v1.json` next to `docs/` in the collections they read (once more than 16 documents had to be fetched); with read-only credentials it is simply not written. Stop every 0.3 writer before 0.4 starts writing. The API changes are listed in the [migration guide](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md) and the [changelog](https://github.com/holdbaby5483/bucket-db/blob/main/CHANGELOG.md).
 
@@ -441,10 +512,11 @@ A custom `StorageAdapter` can set `readonly remote = true` to get the query snap
 📚 https://bucket-db.vercel.app
 
 - [API reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md)
+- [CLI reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md) and [CI recipes](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci)
 - [Guarantees and limits](https://github.com/holdbaby5483/bucket-db/blob/main/docs/GUARANTEES.md): what each backend guarantees and the test that checks it
 - [Storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md): the keys and JSON BucketDB writes
 - [Benchmarks](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md): requests and latency at 100 to 10,000 documents on OSS, S3 and FileSystem
-- [Migrating from 0.3](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md)
+- [Migrating from 0.4](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) and [from 0.3](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md)
 
 ## License
 

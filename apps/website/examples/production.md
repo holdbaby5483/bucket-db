@@ -20,7 +20,7 @@ BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何�
 | 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
 | 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
 
-所有后端都支持多个进程同时 `insert` / `delete`；S3 上多个进程同时 `update` 也是安全的。
+所有后端都支持多个进程同时 `insert` / `put` / `delete`；S3 上多个进程同时 `update` 也是安全的。
 
 ## AWS S3
 
@@ -69,6 +69,20 @@ const adapter = new S3Adapter({ bucket: 'my-app-bucket' });
 ```
 
 找不到 region 时构造函数抛出 `ValidationError`；找不到凭证时在第一次请求时抛出 `ValidationError`。
+
+### 用 URL 连接
+
+也可以用 `BucketDB.connect(url?, options?)` 一行连接，凭证同样来自环境变量；省略 `url` 时读取 `BUCKET_DB_URL`：
+
+```typescript
+// region / endpoint 等写在查询参数里，路径部分（my-app）成为 dbPath
+const db = BucketDB.connect('s3://my-app-bucket/my-app?region=us-east-1');
+
+// 或：BUCKET_DB_URL='s3://my-app-bucket/my-app?region=us-east-1'
+const db2 = BucketDB.connect();
+```
+
+允许的参数为 `region`、`endpoint`（需 URL 编码，如 `endpoint=http%3A%2F%2Flocalhost%3A9000`）、`forcePathStyle`、`timeoutMs`。URL 中不能包含凭证（如 `s3://KEY:SECRET@bucket`），否则抛出 `ValidationError`，错误信息不会回显 URL，因此 URL 可以安全地写进日志。
 
 ### 临时凭证与凭证提供函数
 
@@ -160,8 +174,13 @@ OSS_ACCESS_KEY_SECRET=your_secret_access_key
 OSS_SESSION_TOKEN=...   # 可选，STS 临时凭证
 ```
 
+没有 `OSS_*` 凭证时，会改读 `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `ALIBABA_CLOUD_SECURITY_TOKEN`（`aliyun/configure-aliyun-credentials-action` 通过 OIDC 导出的就是这些变量，见 [CI 中使用](/guide/ci)）。
+
 ```typescript
 const adapter = new OSSAdapter({ bucket: 'my-app-bucket' });
+
+// 或者用 URL
+const db = BucketDB.connect('oss://my-app-bucket/my-app?region=cn-hangzhou');
 ```
 
 `OSS_ENDPOINT` 不会被读取；需要自定义地址时请传 `endpoint`。
@@ -266,23 +285,26 @@ export { db };
 
 ### 4. 并发写入
 
-`insert` 和 `delete` 可以并发执行：
+`insert`、`put` 和 `delete` 可以并发执行；以已知 key 写入时用 `put(id, data)`，重试不会产生重复：
 
 ```typescript
 await Promise.all(newUsers.map((u) => users.insert(u)));
+await Promise.all(records.map((r) => events.put(r.requestId, r)));
 ```
 
 不带 `etag` 的 `update` 在 S3 上遇到冲突会自动重新读取、合并并重试（最多 5 次），并发更新同一文档的不同字段都会生效；在 OSS 上后写覆盖。
 
 ### 5. 分页
 
-`offset` / `limit` 在过滤之后才应用，翻页不会减少请求数：
+`offset` / `limit` / `sort` 在过滤之后才在内存中应用，翻页不会减少请求数：
 
 ```typescript
 const page1 = await users.find({}, { limit: 20, offset: 0 });
+const newest = await users.find({}, { sort: { _createdAt: -1 }, limit: 20 });
+const total = await users.count(); // 不带过滤条件时只 LIST，不读取文档
 ```
 
-结果按 ID（随机 UUID）排序，不是插入顺序；目前没有 `sort`。
+不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，分页顺序稳定。
 
 ### 6. 查询快照、`compact()` 与日志
 
@@ -305,12 +327,12 @@ await db.collection('users').compact();
 
 ## 剩余限制
 
-1. 没有事务；每次写入只涉及一个文档。
+1. 没有事务；每次写入只涉及一个文档。`deleteMany` 逐个删除，不是原子操作。
 2. 容量范围：每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。
 3. OSS：不支持条件更新，带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
 4. FileSystem：条件更新和并发更新合并只在单进程内有效。
-5. 0.3.x 和 0.4 客户端不能同时写同一个集合（0.3 只读取自己的索引，看不到 0.4 的写入）。详见[迁移指南](/guide/migration)。
-6. 快照包含文档内容；结果集不是某一时刻的快照。暂不支持 `sort`、`count`、自定义 ID。详见[保证与限制](/guide/guarantees)。
+5. 0.3.x 和 0.4 及以后的客户端不能同时写同一个集合（0.3 只读取自己的索引，看不到后续版本的写入）。详见[升级指南](/guide/migration)。
+6. 快照包含文档内容；结果集不是某一时刻的快照。详见[保证与限制](/guide/guarantees)。
 
 ## 下一步
 

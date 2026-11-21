@@ -13,7 +13,12 @@
 
 ## 高级用法
 
-- [高级模式](./advanced) - 分页、乐观锁、多租户等高级特性
+- [高级模式](./advanced) - 分页、排序、批量写入与删除、乐观锁、多租户等高级特性
+
+## 命令行与 CI
+
+- [命令行（CLI）](/guide/cli) - 在 shell 和脚本中读写集合、导出导入、doctor 检查
+- [CI 中使用](/guide/ci) - 在 GitHub Actions / GitLab CI 中跨运行保存数据，凭证通过 OIDC 签发
 
 ## 运行示例
 

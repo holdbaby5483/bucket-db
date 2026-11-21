@@ -1,6 +1,6 @@
 # 基础用法示例
 
-完整的 CRUD 操作示例，展示 BucketDB 0.4 的基本功能。
+完整的 CRUD 操作示例，展示 BucketDB 0.5 的基本功能。
 
 ## 完整代码
 
@@ -79,11 +79,13 @@ async function main() {
 
   console.log('\n=== 分页查询 ===');
 
-  // 9. 分页查询
+  // 9. 分页查询（默认按 _createdAt 升序、再按 id 升序；也可传 sort）
   const page1 = await users.find({}, { limit: 2, offset: 0 });
   const page2 = await users.find({}, { limit: 2, offset: 2 });
+  const oldest = await users.find({}, { sort: { age: -1 }, limit: 1 });
   console.log('Page 1:', page1.map(u => u.name));
   console.log('Page 2:', page2.map(u => u.name));
+  console.log('Oldest:', oldest[0]?.name);
 
   console.log('\n=== 更新文档 ===');
 
@@ -121,8 +123,9 @@ async function main() {
   console.log('\n=== 最终统计 ===');
 
   // 13. 最终查询
+  const total = await users.count();
   const allUsers = await users.find({});
-  console.log('Total users:', allUsers.length);
+  console.log('Total users:', total);
   console.log('Remaining users:', allUsers.map(u => u.name));
 }
 
@@ -131,7 +134,7 @@ main().catch(console.error);
 
 ## 运行结果
 
-ID 是随机 UUID；`find` 结果按 ID（存储键）排序，而不是插入顺序，因此数组顺序和分页内容每次运行可能不同。下面是一次可能的输出：
+ID 是随机 UUID；`find` 默认按 `_createdAt` 升序、再按 `id` 升序返回，大致就是插入顺序（同一毫秒内插入的文档按 ID 排列）。需要其他顺序时传 `sort`。下面是一次可能的输出：
 
 ```
 === 插入文档 ===
@@ -154,6 +157,7 @@ Active adults (25-34): [ 'Alice', 'Bob' ]
 === 分页查询 ===
 Page 1: [ 'Alice', 'Bob' ]
 Page 2: [ 'Charlie' ]
+Oldest: Charlie
 
 === 更新文档 ===
 Updated Alice age: 26

@@ -80,7 +80,20 @@ type InsertDocument<T extends Document> = Omit<T, 'id' | '_etag' | '_createdAt' 
 type UpdateDocument<T extends Document> = Partial<Omit<T, 'id' | '_etag' | '_createdAt' | '_updatedAt'>>;
 ```
 
-运行时 `insert` 和 `update` 也会剥离传入的系统字段。`id` 由 BucketDB 生成（UUID），`update` 会把 `_updatedAt` 设为当前时间并保留 `_createdAt`。
+运行时 `insert`、`put` 和 `update` 也会剥离传入的系统字段。`insert` 不指定 ID 时由 BucketDB 生成 `id`（UUID），`update` 会把 `_updatedAt` 设为当前时间并保留 `_createdAt`。
+
+### put 与 insert
+
+已知 ID 时（例如运行编号、commit sha），有两种写法：
+
+| | `insert(data, { id })` | `put(id, data)` |
+|---|---|---|
+| 请求 | 1 次条件 PUT（不存在才创建） | 1 次无条件 PUT |
+| ID 已存在 | 抛出 `DocumentExistsError` | 替换整个文档 |
+| 重复执行 | 第二次抛错；并发时恰好一个成功 | 结果相同（幂等） |
+| 时间戳 | `_createdAt` = `_updatedAt` = 现在 | 都设为现在（不读取旧文档，`_createdAt` 被重置） |
+
+`put` 写入后，`data` 中没有的字段不再存在。重试或重新运行需要覆盖而不是重复写入时用 `put`；只能创建一次时用 `insert(data, { id })`。不合法的 ID 抛出 `ValidationError`。在 `capabilities.createIfAbsent` 为 `'none'` 的自定义后端上，带 `id` 的 `insert` 抛出 `UnsupportedError`（内置适配器都支持）。
 
 读取文档时，`id` 取自对象 key，`_etag` 取自存储返回的 ETag（`_etag` 不保存在文档内容中），与文档 JSON 中写了什么无关。
 
@@ -138,15 +151,24 @@ my-app/
 | 操作 | 存储请求 |
 |------|----------|
 | `insert` | 1 次条件 PUT（不存在才创建） |
+| `insert(data, { id })` | 1 次条件 PUT |
+| `put(id, data)` | 1 次 PUT |
 | `findById` | 1 次 GET |
 | `update` | 1 次 GET + 1 次条件 PUT |
 | `delete` | 1 次 DELETE（幂等，文档不存在也不报错） |
+| `deleteMany(filter)` | `find(filter)` + 每个匹配文档 1 次 DELETE（并发 16 个） |
+| `count()` | LIST `docs/`（每 1000 个文档 1 次请求），不读取文档 |
+| `count(filter)` | 与 `find(filter)` 相同 |
 | `find({ id: '...' })` | 1 次 GET（`id` 为普通字符串时） |
 | `find`（S3/OSS，热） | LIST `docs/`（每 1000 个文档 1 次请求）+ 1 次快照 GET + 自快照以来每个变化文档 1 次 GET；变化超过 16 个时再加 1 次快照 PUT |
 | `find`（Memory/FileSystem） | 列出 `docs/` + 读取**每一个**文件（并发 16 个） |
 | `compact()` | S3/OSS：LIST + GET 每个文档 + 1 次快照 PUT；本地后端无操作 |
 
-`find` 在内存中过滤，然后应用 `offset` / `limit`（不会减少读取）。结果按 key 顺序（即 ID 顺序）返回；ID 是随机 UUID，因此**不是**插入顺序。目前没有 `sort`。在 LIST 与 GET 之间被删除的文档会被跳过。
+`find` 在内存中过滤，然后应用 `sort` / `offset` / `limit`（不会减少读取）。不传 `sort` 时结果按 `_createdAt` 升序、再按 `id` 升序返回——顺序稳定，适合分页，大致是插入顺序。传入 `sort` 时按给定字段排序，相同时同样回退到 `_createdAt`、`id`。没有 `_createdAt` 的文档（由其他工具写入）排在最后；`put` 会重置 `_createdAt`，被替换的文档移到默认顺序的末尾。详见[查询语法](./queries#排序)。在 LIST 与 GET 之间被删除的文档会被跳过。
+
+`count(filter?)` 返回匹配的文档数；不传条件时只列出集合，不读取文档。
+
+`deleteMany(filter)` 先执行 `find(filter)`，再逐个删除匹配的文档（并发 16 个），返回匹配数量。它**不是原子的**：中途失败时已完成的删除不会恢复，调用期间写入的文档可能保留。
 
 实测耗时（见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)）：OSS 热 `find` 在 100 / 1,000 / 10,000 个文档时为 0.11 / 0.27 / 1.35 秒；S3（ap-southeast-2，测试客户端 RTT 约 200 ms）为 0.45 / 1.0 / 3.2 秒；10,000 个文档没有快照的冷查询 OSS 34 秒、S3 134 秒。FileSystem 在 10,000 个文档时每次 `find` 约 0.5 秒。
 
@@ -265,7 +287,7 @@ async function incrementAge(id: string) {
 
 详见[保证与限制](./guarantees)（每条保证都注明了对应的测试）。
 
-当前版本（0.4.0）的其他限制：
+当前版本（0.5.0）的其他限制：
 
 1. **没有事务** - 每次写入只涉及一个文档。
 2. **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。S3/OSS 上热 `find` 为 LIST + 1 次快照 GET + 变化文档的 GET；Memory/FileSystem 上每次 `find` 读取每个文件。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
@@ -274,7 +296,7 @@ async function incrementAge(id: string) {
 5. **不能与 0.3.x 同时写入** - 0.3.x 只读取自己的索引，看不到 0.4 的写入；同一集合不能由 0.3.x 和 0.4 客户端同时写入。详见[升级指南](./migration)。
 6. **快照包含文档内容** - 已删除文档的内容在快照重写或 `compact()` 之前仍保留。
 7. **结果不是某一时刻的快照** - 每个文档都是已提交的版本，但结果集整体不是时间点一致的。
-8. **功能范围** - 暂无 `sort`、`count`、自定义 ID。
+8. **deleteMany 不是原子的** - 中途失败时已完成的删除不会恢复。
 
 ## 下一步
 

@@ -10,7 +10,7 @@ hero:
       text: 快速开始
       link: /guide/
     - theme: alt
-      text: 从 0.3 升级
+      text: 升级到 0.5
       link: /guide/migration
     - theme: alt
       text: 查看 GitHub
@@ -37,7 +37,7 @@ features:
     details: 完整的 TypeScript 类型推断,插入和更新类型自动排除系统字段
   - icon: 🔍
     title: 灵活查询
-    details: 8 种查询操作符,支持条件组合和分页
+    details: 8 种查询操作符,支持条件组合、多字段排序、count 和分页
   - icon: 🔒
     title: 乐观锁
     details: update 支持基于 ETag 的冲突检测,S3 与 Memory 上为原子条件写入,FileSystem 上限单进程
@@ -46,8 +46,8 @@ features:
     details: 通过 dbPath 参数实现多环境、多租户的数据隔离
 ---
 
-::: tip 0.4.0
-0.4.0 在 S3/OSS 上为查询增加了快照,热查询不再逐个读取文档。从 0.3.x 升级请先阅读[升级指南](/guide/migration)。
+::: tip 0.5.0
+0.5.0 新增:用一个连接字符串打开数据库(`BucketDB.connect()` / `BUCKET_DB_URL`);`put` 按已知 ID 创建或替换;`insert` 可指定 ID(已存在时抛出 `DocumentExistsError`);`find` 支持 `sort`,新增 `count` 与 `deleteMany`;随包附带命令行工具 `npx @hold-baby/bucket-db`,见[命令行](/guide/cli)和[在 CI 中使用](/guide/ci)。查询语义和默认顺序有不兼容变化,从 0.4 升级请先阅读[升级指南](/guide/migration)。
 :::
 
 ## 快速示例
@@ -62,11 +62,8 @@ interface User extends Document {
   email: string;
 }
 
-// 创建数据库实例
-const db = new BucketDB(
-  new FileSystemAdapter({ basePath: './data' }),
-  'my-app'
-);
+// 创建数据库实例(也可以 new BucketDB(adapter, dbPath))
+const db = BucketDB.connect('file://./data');
 
 // 获取集合
 const users = db.collection<User>('users');
@@ -96,7 +93,7 @@ await users.delete(user.id);
 - **云原生** - 已使用云对象存储,希望简化架构、不运维数据库
 - **类型安全** - TypeScript 项目,需要完整类型支持
 
-### ⚠️ 当前限制(0.4.0)
+### ⚠️ 当前限制(0.5.0)
 
 - **没有事务** - 每次写入只涉及一个文档。
 - **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照;超出后查询仍可用但更慢,并记录一次警告。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
@@ -105,7 +102,7 @@ await users.delete(user.id);
 - **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛出 `UnsupportedError`;不带 `etag` 的并发更新后写覆盖。
 - **FileSystem 的条件更新仅在单进程内有效**。
 - **0.3.x 与 0.4 不能同时写入同一集合**。
-- **功能范围** - 暂无 `sort`、`count`、自定义 ID。
+- **deleteMany 不是原子的** - 中途失败时已删除的文档不会恢复。
 
 各存储后端的保证详见[保证与限制](/guide/guarantees)。
 

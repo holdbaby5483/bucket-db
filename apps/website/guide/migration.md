@@ -1,8 +1,72 @@
-# 从 0.3 升级到 0.4
+# 升级指南
+
+## 从 0.4 升级到 0.5
+
+0.5.0 新增了连接字符串（`BucketDB.connect()` / `BUCKET_DB_URL`）、`put`、带 `id` 的 `insert`、`sort`、`count`、`deleteMany` 和命令行工具（见[命令行](/guide/cli)）。**存储格式没有变化**，不需要转换数据。以下 4 项是不兼容变更，完整说明见 [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md)。
+
+### 查询语义
+
+字段缺失按 `undefined` 处理；类型不同不再报错（完整规则见[匹配规则](/guide/queries#匹配规则)）。
+
+```typescript
+// 0.4：文档中 age 为 "30"（字符串）时抛出 ValidationError
+// 0.5：该文档只是不匹配
+await users.find({ age: { $gt: 18 } });
+
+// 0.4：不匹配缺少 role 字段的文档
+// 0.5：$ne / $nin 也匹配缺少该字段的文档
+await users.find({ role: { $ne: 'admin' } });
+
+// 需要要求字段存在时，在代码中过滤
+const withRole = (await users.find({ role: { $ne: 'admin' } }))
+  .filter(u => u.role !== undefined);
+```
+
+`$nin: []` 现在不排除任何文档，也不再跳过同一字段上的其他操作符（0.4 的缺陷）。
+
+### 默认顺序
+
+```typescript
+// 0.4：按 key（文档 ID）顺序，自动生成的 ID 是随机 UUID
+// 0.5：按 _createdAt 升序、再按 id 升序（大致是插入顺序）
+const all = await users.find({});
+
+// 需要其他顺序时显式传入 sort
+const byName = await users.find({}, { sort: { name: 1 } });
+```
+
+### `limit: 0`
+
+```typescript
+// 0.4：limit: 0 被忽略，返回全部
+// 0.5：返回 []
+await users.find({}, { limit: 0 });
+
+// 需要全部时省略 limit
+await users.find({});
+```
+
+负数或小数的 `limit` / `offset` 现在抛出 `ValidationError`。
+
+### MCP 服务器配置
+
+MCP 服务器（0.2.0）只通过 `BUCKET_DB_URL` 配置，凭证来自 `AWS_*` / `OSS_*` 环境变量：
+
+```bash
+# 旧配置
+BUCKET_DB_ADAPTER=s3 BUCKET_DB_S3_BUCKET=my-bucket BUCKET_DB_S3_REGION=us-east-1 BUCKET_DB_PATH=app
+
+# 新配置（凭证放在 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY）
+BUCKET_DB_URL=s3://my-bucket/app?region=us-east-1
+```
+
+完整对照见 [MCP 服务器](/guide/mcp#从-0-1-配置迁移)。
+
+## 从 0.3 升级到 0.4
 
 0.4.0 重写了存储核心：每个文档一个对象，不再有索引和日志文件，零运行时依赖，内置 S3 客户端。文档数据格式没有变化，0.4 可以直接读取 0.3 的集合；但部分 API 有破坏性变更，自定义存储适配器需要重写。
 
-## 变更一览
+### 变更一览
 
 | 项目 | 0.3.x | 0.4.0 |
 |------|-------|--------------|
@@ -21,9 +85,9 @@
 | `StorageAdapter` 接口 | `get/put/delete/exists/listKeys/batchGet` | `capabilities` + `get/put/delete/list`（字节、分页） |
 | 运行环境 | 未声明 | Node.js 20+ 或 Bun |
 
-## 破坏性变更
+### 破坏性变更
 
-### 移除分片配置
+#### 移除分片配置
 
 `BucketDB` 构造函数不再有第三个参数，`db.collection()` 不再有第二个参数。
 
@@ -37,7 +101,7 @@ const db = new BucketDB(adapter, 'my-app');
 const users = db.collection<User>('users');
 ```
 
-### `delete` 变为幂等
+#### `delete` 变为幂等
 
 ```typescript
 // 0.3
@@ -53,7 +117,7 @@ await users.delete(id);
 
 `update` 不存在的文档仍然抛出 `DocumentNotFoundError`。
 
-### 不合法的名字抛出 `ValidationError`
+#### 不合法的名字抛出 `ValidationError`
 
 集合名、文档 ID 和 `dbPath` 的每一段都必须匹配 `^[A-Za-z0-9_.-]{1,255}$` 且不能以 `.` 开头。0.4 不再改写名字；`PathValidationError` 已移除。
 
@@ -81,7 +145,7 @@ try {
 }
 ```
 
-### `findById` 在存储错误时抛出
+#### `findById` 在存储错误时抛出
 
 ```typescript
 // 0.3：网络或权限错误时也返回 null
@@ -99,7 +163,7 @@ try {
 }
 ```
 
-### `StorageError` 新增 `kind` / `key` / `status`
+#### `StorageError` 新增 `kind` / `key` / `status`
 
 第二个构造参数改为选项对象。`kind` 取值为 `'not-found' | 'conflict' | 'transient' | 'permanent'`（默认 `'permanent'`）；`transient` 表示重试后仍失败的可重试错误。
 
@@ -111,7 +175,7 @@ throw new StorageError('Failed to read', cause);
 throw new StorageError('Failed to read', { kind: 'transient', key, status: 503, cause });
 ```
 
-### 适配器构造参数
+#### 适配器构造参数
 
 `region` 和 `credentials` 变为可选，未传入时从环境变量读取（见[安装指南](/guide/installation)）。`credentials` 支持 `sessionToken`，也可以是返回凭证的异步函数。
 
@@ -147,7 +211,7 @@ const oss = new OSSAdapter({
 
 如果 0.3 中把 `endpoint` 设为 OSS 原生 endpoint，0.4 中请删除它（使用默认值），或改为 S3 兼容 endpoint。通过自定义域名进行 S3 兼容访问目前未经验证。
 
-### OSS 上带 `etag` 的 `update` 抛出 `UnsupportedError`
+#### OSS 上带 `etag` 的 `update` 抛出 `UnsupportedError`
 
 ```typescript
 // 0.3：在 OSS 上可以调用，但无法阻止并发覆盖
@@ -159,7 +223,7 @@ await users.update(id, { age: 26 });
 
 在 OSS 上不带 `etag` 的并发更新是后写覆盖。需要乐观锁请使用 S3。
 
-### `UpdateDocument<T>` 排除系统字段
+#### `UpdateDocument<T>` 排除系统字段
 
 ```typescript
 // 0.3：类型允许传入 _etag / _createdAt / _updatedAt
@@ -169,7 +233,7 @@ await users.update(id, { age: 26, _updatedAt: new Date().toISOString() });
 await users.update(id, { age: 26 });
 ```
 
-### 类型导出变化
+#### 类型导出变化
 
 - **移除**：`StorageObject`、`PutOptions`、`StorageCredentials`、`StorageAdapterConfig`、`ICollection`、`CollectionMeta`、`IndexShard`
 - **新增**：`UnsupportedError`、`FileSystemAdapterConfig`、`S3AdapterOptions`、`OSSAdapterOptions`、`Credentials`、`CredentialProvider`、`Capabilities`、`Guarantee`、`WriteCondition`、`ObjectEntry`、`ListPage`、`ListOptions`、`StorageErrorKind`、`StorageErrorOptions`
@@ -182,12 +246,12 @@ import type { StorageCredentials, StorageAdapterConfig } from '@hold-baby/bucket
 import type { Credentials, S3AdapterOptions, OSSAdapterOptions } from '@hold-baby/bucket-db';
 ```
 
-## 迁移已有的 0.3 集合
+### 迁移已有的 0.3 集合
 
 文档对象 `docs/<id>.json` 的格式没有变化，**不需要转换数据**，0.4 可以直接读取 0.3 的集合。
 
 1. **停止所有 0.3 写入进程**。0.3 只读取自己的索引，看不到 0.4 的写入；0.3 和 0.4 不能同时写入同一集合。
-2. 升级依赖到 `@hold-baby/bucket-db@0.4.0`，按上文修改代码。
+2. 升级依赖到 `@hold-baby/bucket-db@0.4.0`（或直接升级到 0.5.0，并同时按上文“从 0.4 升级到 0.5”修改），按上文修改代码。
 3. 启动 0.4 客户端。
 4. （可选）删除 0.3 遗留的 `index/`、`wal/` 目录和 `docs/*.meta` 文件。0.4 会忽略它们，删除只是为了节省存储空间。
 
@@ -195,7 +259,7 @@ import type { Credentials, S3AdapterOptions, OSSAdapterOptions } from '@hold-bab
 
 在 S3/OSS 上，0.4 的查询会在集合里创建 `_snapshot.v1.json`（某次查询需要逐个读取的文档超过 16 个时写入；位于 `docs/` 旁边，与 0.3 遗留的 `index/`、`wal/` 并列，后两者仍被忽略）。快照只用于加速查询，可随时删除，见[存储格式](./storage-format)。快照包含文档内容的副本，访问权限应与 `docs/` 相同。只读凭证同样可用：第一次遇到 401/403 后该集合就不再尝试写快照，查询照常返回正确结果。
 
-## 重写自定义存储适配器
+### 重写自定义存储适配器
 
 0.4 的 `StorageAdapter` 是一个扁平的键值对象存储接口，读写字节（`Uint8Array`），并通过 `capabilities` 声明条件写入的保证强度。
 

@@ -1,6 +1,6 @@
 # Storage Format
 
-What BucketDB 0.4 writes to your bucket or directory, and the rules any other reader or writer of that data must follow. The same layout is used on every backend; only S3 and OSS add a snapshot.
+What BucketDB 0.4 and 0.5 write to your bucket or directory (the format did not change in 0.5), and the rules any other reader or writer of that data must follow. The same layout is used on every backend; only S3 and OSS add a snapshot.
 
 ## Key layout
 
@@ -12,15 +12,15 @@ What BucketDB 0.4 writes to your bucket or directory, and the rules any other re
     _snapshot.v1.json      # S3 / OSS only: query snapshot, disposable
 ```
 
-- `<dbPath>` is the prefix passed to `new BucketDB(adapter, dbPath)`. It may contain `/` (`tenants/a`). With `dbPath = ''` the collections sit at the bucket root: `<collection>/docs/<id>.json`.
+- `<dbPath>` is the prefix passed to `new BucketDB(adapter, dbPath)`, or the path of a connection URL (`s3://bucket/<dbPath>`, see `BucketDB.connect`). It may contain `/` (`tenants/a`). With `dbPath = ''` the collections sit at the bucket root: `<collection>/docs/<id>.json`.
 - On `FileSystemAdapter` every key is a file path under `basePath`. `MemoryStorageAdapter` keeps the same keys in memory.
 - The snapshot sits next to `docs/`, not inside it, so it never appears in the list of documents.
 
-Nothing else is written: no index, no log, no metadata objects.
+Nothing else is written: no index, no log, no metadata objects. The one exception is `bucket-db doctor` ([CLI.md](./CLI.md#doctor)), which writes test objects under `<dbPath>/_doctor-<unix time in ms>/` (`_doctor-<time>/` at the root when `dbPath` is `''`) and deletes them before it exits, also when a check fails. None of its keys is under a `docs/` directory, so no collection ever reads them. If the process is killed midway, the leftover `_doctor-…/` prefix can be deleted.
 
 ## Names
 
-Collection names, document IDs and every `/`-separated segment of `dbPath` must be 1–255 characters from `A-Z a-z 0-9 _ - .` (`^[A-Za-z0-9_.-]{1,255}$`) and must not start with `.`. BucketDB rejects anything else with `ValidationError`; it never rewrites a name. `insert` generates IDs with `crypto.randomUUID()`.
+Collection names, document IDs and every `/`-separated segment of `dbPath` must be 1–255 characters from `A-Z a-z 0-9 _ - .` (`^[A-Za-z0-9_.-]{1,255}$`) and must not start with `.`. BucketDB rejects anything else with `ValidationError`; it never rewrites a name. `insert` generates IDs with `crypto.randomUUID()` unless it is given `{ id }`; `put` always takes the ID from the caller.
 
 ## Documents: `docs/<id>.json`
 
@@ -39,11 +39,17 @@ Rules:
 
 - **The key decides the ID.** On every read, `id` is the `<id>` from the key, whatever the body says. BucketDB writes `id` into the body, but never reads it back.
 - **The storage service decides the etag.** `_etag` is the ETag the service reports (unquoted); it is never stored in the body, and a stored `_etag` is ignored.
-- **System fields.** `_createdAt` and `_updatedAt` are ISO 8601 timestamps set by `insert` and `update`. A body without them is still a valid document; the fields are then absent.
+- **System fields.** `_createdAt` and `_updatedAt` are ISO 8601 timestamps. `insert` and `put` set both to the current time (`put` does not read the old document, so a replaced document gets a new `_createdAt`); `update` keeps `_createdAt` and sets `_updatedAt`. `find`'s default order is `_createdAt`, then `id`. A body without them is still a valid document; the fields are then absent, and such documents sort last by default.
 - **Any JSON object is a document.** A file placed at `docs/<id>.json` by other means is read like one BucketDB wrote.
 - **Anything else under `docs/` is an error.** A name that is not `<valid id>.json`, or a body that is not a JSON object, makes `find` throw `StorageError` with `key` set to that object. Names starting with `.` (for example `.DS_Store`) are skipped. `FileSystemAdapter` also skips its own `*.tmp` write files and 0.3's `*.meta` files.
 
-Every write is one request on one document object: `insert` is a create-if-absent PUT, `update` a GET plus a (where supported, conditional) PUT, `delete` a DELETE.
+Every write is one request on one document object: `insert` is a create-if-absent PUT, `put` an unconditional PUT, `update` a GET plus a (where supported, conditional) PUT, `delete` a DELETE. `deleteMany` is a `find` followed by one DELETE per match.
+
+## Writing documents from other tools
+
+Because the key decides the ID and any JSON object is a document, other programs can write documents directly: PUT a JSON object to `<dbPath>/<collection>/docs/<id>.json`. Include `_createdAt` (ISO 8601) if the document should take its place in the default order.
+
+`bucket-db import` ([CLI.md](./CLI.md#export-and-import)) does exactly this: each JSON line with a string `id` is written as the body of `docs/<id>.json` with one unconditional PUT, `id`, `_createdAt`, `_updatedAt` and every other field kept as given and `_etag` left out. That is why `bucket-db export | bucket-db import` restores a collection with its IDs and timestamps. Lines without `id` go through `insert`.
 
 ## Snapshot: `_snapshot.v1.json`
 
@@ -87,7 +93,7 @@ The snapshot holds full document contents. A deleted document's contents remain 
 
 ## 0.3 leftovers
 
-0.3 kept `index/` and `wal/` directories next to `docs/`, and `FileSystemAdapter` wrote `*.meta` files beside each document. 0.4 never reads them: it lists only `docs/` and reads only the snapshot key above. They can be deleted. The document objects themselves have the same format, so 0.4 reads 0.3 collections without conversion. See [MIGRATION-0.4.md](./MIGRATION-0.4.md).
+0.3 kept `index/` and `wal/` directories next to `docs/`, and `FileSystemAdapter` wrote `*.meta` files beside each document. 0.4 and later never read them: they list only `docs/` and read only the snapshot key above. They can be deleted. The document objects themselves have the same format, so 0.4 and later read 0.3 collections without conversion. See [MIGRATION-0.4.md](./MIGRATION-0.4.md).
 
 ## Compatibility promise
 

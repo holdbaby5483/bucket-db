@@ -1,20 +1,20 @@
 # 保证与限制
 
-适用于 0.4.0。每一行都注明了检查它的测试。测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
+适用于 0.5.0。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
 
 ## 各后端
 
 | 保证 | Memory | FileSystem | S3 | OSS | 检查方式 |
 |---|---|---|---|---|---|
 | 单次写入原子 | 是 | 是 | 是 | 是 | 每次写入是一次请求：collection D2。在任意时刻崩溃都只会留下旧状态或新状态：`core/collection-crash.test.ts`（Memory）。单次请求的原子性由后端保证：S3 / OSS 的 PUT，FileSystem 的临时文件 + `link()` / `rename()` |
-| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） | Storage contract B1、B2；`core/multiprocess.test.ts`。开启版本控制的 OSS bucket 未测试 |
+| 不存在才创建（`insert`，带或不带 `id`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） | Storage contract B1、B2；collection D15（同一 `id` 并发 5 次 `insert`：恰好一次成功，其余抛 `DocumentExistsError`）；`core/multiprocess.test.ts`。开启版本控制的 OSS bucket 未测试 |
 | 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` | Storage contract B3、B4；collection D9；`core/collection-faults.test.ts` "update throws ConcurrentUpdateError when another writer changes the document…"。OSS 拒绝：storage contract B5、collection D9 |
 | 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） | Collection D10 |
 | 查询结果与存储的文档一致 | 是 | 是 | 是 | 是 | Collection D4、D5、D7/D8、D13；`core/snapshot.test.ts`（见下文）。依赖 LIST 立即反映写入：storage contract A7 |
 
 所有后端都支持多个写入进程并发执行 `insert` 和 `delete`；S3 上还支持并发 `update`（Memory 和 FileSystem 限单进程内）。`core/multiprocess.test.ts` 运行 4 个进程各插入 25 个文档，检查全部 100 个文档可见，覆盖 FileSystem、模拟 S3、CI 中的本地 S3、真实 OSS 和真实 S3。
 
-## 查询
+## 集合操作
 
 | 保证 | 检查方式 |
 |---|---|
@@ -25,8 +25,63 @@
 | 0.3 的集合可以读取；`index/` 和 `wal/` 会被忽略 | Collection D13 |
 | 不合法的名字、ID 和过滤条件在发出任何存储请求之前就被拒绝 | Collection D12 |
 | `insert` 和 `delete` 各是一次请求；`findById` 是一次 GET | Collection D2 |
+| `put` 是一次无条件 PUT，创建或整体替换文档；重复执行仍只有一个文档 | Collection D14 "put creates or replaces the whole document in one unconditional write" |
+| 带 `id` 的 `insert` 只创建一次，之后抛 `DocumentExistsError`；不合法的 `id` 抛 `ValidationError` | Collection D15 "insert with an explicit id creates once, then throws DocumentExistsError" |
+| 不带过滤条件的 `count()` 只做 LIST（不 GET）；带过滤条件时统计匹配数 | Collection D16 "count without a filter only lists; with a filter it counts matches" |
+| `deleteMany` 恰好删除匹配的文档并返回数量 | Collection D17 "deleteMany deletes the matches and reports how many"。它**不是原子的**（每个匹配一次 DELETE，16 个并发）：中途失败时，之前的删除已经生效。这是设计如此，不作为保证测试 |
+| 默认顺序为 `_createdAt`、再 `id`；`sort` 按给定字段排序；`limit: 0` 返回空；负数 `limit` 抛 `ValidationError` | Collection D18 "find sorts by _createdAt then id by default, by the given fields otherwise; limit 0 is empty" |
 
 一致性级别：结果中的每个文档都是某个时刻已提交的版本，但整个结果集不是集合在某一时刻的快照。查询执行期间写入的文档可能在结果中，也可能不在。
+
+## 查询语义
+
+`query/query.test.ts` 中的 "settled semantics (0.5)" 和 "sortDocuments"：
+
+| 保证 | 测试 |
+|---|---|
+| 类型不同的范围比较是不匹配，而不是报错 | "a type mismatch is no match, not an error" |
+| `$ne` 和 `$nin` 匹配缺少该字段的文档；`$eq`、范围操作符和 `$in` 不匹配 | "$ne and $nin match a missing field; $eq, ranges and $in do not" |
+| `$nin: []` 不排除任何文档，也不会跳过其他操作符 | "an empty $nin excludes nothing and does not skip the other operators" |
+| 默认顺序为 `_createdAt`、再 `id` | "default order is _createdAt, then id" |
+| 缺失值无论升序降序都排在最后；相同时回退到 `_createdAt` | "missing values sort last in both directions; ties fall back to _createdAt" |
+| 混合类型按 boolean < number < string 排序 | "mixed types order as booleans < numbers < strings" |
+| 非法的排序方向或字段抛 `ValidationError` | "an invalid direction or field is a ValidationError" |
+
+## 连接 URL
+
+`core/connect.test.ts` 中的 "connection URLs"：
+
+| 保证 | 测试 |
+|---|---|
+| `s3://`、`oss://`、`file://`、`memory://` 选择对应后端；路径成为 `dbPath` | "each scheme selects its backend and the path becomes dbPath" |
+| 含凭证的 URL 被拒绝，错误信息不回显凭证 | "credentials in the URL are refused without echoing them" |
+| 未知参数、未知 scheme、缺少 bucket 的 `s3://` / `oss://` URL 被拒绝 | "unknown parameters, schemes and missing buckets are refused" |
+| 默认读取 `BUCKET_DB_URL` | "BUCKET_DB_URL is the default" |
+| `BucketDB.connect` 在 `file://`、`memory://` 和 S3 端点上端到端可用 | "connect works end to end on file, memory and an S3 endpoint" |
+
+## 命令行
+
+`core/cli.test.ts` 中的 "bucket-db CLI"，以子进程运行 `src/cli.ts`；CI 的 Node 任务还会在 Node 20 和 22 上运行构建后的 CLI（`put`、`count`、`export | import`、`get`、`doctor`、退出码 2）。
+
+| 保证 | 测试 |
+|---|---|
+| `put`（参数或 stdin）、`get`、带 `--sort` / `--limit` 的 `find`、`count`、`delete` 输出 JSON；`get` 不存在的文档时退出码 2、stdout 为空 | "put, get, find, count and delete round trip with JSON output and exit codes" |
+| `export` 输出不含 `_etag` 的 JSON Lines；`import` 保留 id 和时间戳，没有 `id` 的行作为新文档插入 | "export then import into another collection keeps ids and timestamps" |
+| 错误输出到 stderr、退出码 1；含凭证的 URL 被拒绝且不打印凭证 | "errors go to stderr with exit code 1 and never echo URL credentials" |
+| `doctor` 在 FileSystem 和 S3 端点上通过，且不留下对象 | "doctor passes on the filesystem and an S3 endpoint and leaves nothing behind" |
+| 在声明不支持 compare-and-swap 的后端（OSS 方言）上，`doctor` 跳过该项并通过 | "doctor reports a backend that only pretends to create atomically" |
+
+`doctor` 本身检查的是真实服务：对象往返、LIST 立即反映写入/覆盖/删除且 etag 一致、10 个并发写入者下的不存在才创建和 compare-and-swap（必须恰好一个成功；后端声明不支持时跳过）。它已在真实 AWS S3 和阿里云 OSS 上手动运行通过。见[命令行 · doctor](/guide/cli#doctor)。
+
+## MCP 服务器
+
+[`apps/mcp/tests/mcp.test.ts`](https://github.com/holdbaby5483/bucket-db/blob/main/apps/mcp/tests/mcp.test.ts) 中的 "MCP server"，通过 stdio 运行：
+
+| 保证 | 测试 |
+|---|---|
+| `db_insert`、`db_put`、`db_find`、`db_count`、`db_update`、`db_delete` 可通过协议调用 | "insert, put, find, count, update and delete through tools" |
+| 已被占用的 `id` 和不合法的名字以工具错误返回 | "insert with a taken id and invalid names are reported as tool errors" |
+| 没有 `BUCKET_DB_URL` 时服务器输出提示并退出 | "without BUCKET_DB_URL the server exits with a message" |
 
 ## 快照（S3、OSS 及 `remote: true` 的适配器）
 
@@ -72,13 +127,14 @@
 
 ## 限制
 
-- **没有事务。** 每次写入只涉及一个文档。
+- **没有事务。** 每次写入只涉及一个文档。`deleteMany` 是一连串单独的删除，不是一个操作。
+- **`put` 在所有后端上都是后写覆盖。** 它不带写入条件；只想创建一次请用带 `id` 的 `insert`，想保护修改请用带 `etag` 的 `update`。
 - **容量范围：每个集合最多 10,000 个文档、10 MB 快照。** 超出后查询仍然可用，但会越来越慢；集合会在每个 `Collection` 实例上记录一次警告（本地后端只检查文档数）。10,000 个文档时实测：热 `find` 在 OSS 上 1.35 秒、S3 上 3.2 秒，没有快照的查询分别为 34 秒和 134 秒。见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
-- **查询成本。** 在 S3 / OSS 上，热 `find` 是 ⌈N/1000⌉ 次 LIST + 1 次快照 GET，再加上自快照以来每个变化的文档 1 次 GET；变化超过 16 个时还会用 1 次 PUT 重写快照。在 Memory 和 FileSystem 上，每次 `find` 都读取每个文档。`{ id: '...' }` 过滤在所有后端上都只读取一个文档。`limit` 和 `offset` 不会减少读取。
+- **查询成本。** 在 S3 / OSS 上，热 `find` 是 ⌈N/1000⌉ 次 LIST + 1 次快照 GET，再加上自快照以来每个变化的文档 1 次 GET；变化超过 16 个时还会用 1 次 PUT 重写快照。在 Memory 和 FileSystem 上，每次 `find` 都读取每个文档。`{ id: '...' }` 过滤在所有后端上都只读取一个文档。`sort`、`limit` 和 `offset` 不会减少读取。不带过滤条件的 `count()` 只做 ⌈N/1000⌉ 次 LIST；`count(filter)` 和 `deleteMany(filter)` 的成本与一次 `find` 相同。
 - **快照包含文档内容。** 已删除文档的内容会留在 `_snapshot.v1.json` 中，直到快照被重写或执行 `compact()`。删除隐私敏感数据后请调用 `compact()`。
 - **OSS 不支持条件更新。** 带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。在开启版本控制的 OSS bucket 上，不存在才创建也不生效。
 - **FileSystem 的条件更新仅限单进程。** `etag` 检查和并发 `update` 的合并只在同一进程的写入者之间有效。
 - **结果不是某一时刻的快照。** 见上面的一致性级别。
-- **0.3.x 与 0.4 不能同时写入同一集合。** 0.3 只读取自己的索引，看不到 0.4 的写入。
+- **0.3.x 与 0.4 及以后的版本不能同时写入同一集合。** 0.3 只读取自己的索引，看不到后续版本的写入。0.4 与 0.5 写入格式和写入代码路径相同，可以共用一个集合；这一点来自代码层面的判断，没有测试覆盖。
 - **云服务中只测试了 AWS S3 和阿里云 OSS。** 其他 S3 兼容服务可以通过 `endpoint` 尝试使用；CI 中用 SeaweedFS 作为本地替代。
 - **OSS 上 LIST 的写后读一致性是观察结果，而非承诺。** AWS 文档承诺 LIST 强一致；对 OSS，storage contract A7 持续在真实服务上检查。
