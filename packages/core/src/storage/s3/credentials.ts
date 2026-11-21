@@ -17,24 +17,28 @@ const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 /**
  * Turns the `credentials` option into a function returning current
- * credentials. Without the option, credentials are read from the environment
- * on first use; missing variables throw ValidationError then.
+ * credentials. Without the option, credentials come from the first variable
+ * set in `envSets` that has both an id and a secret, read on first use;
+ * none set throws ValidationError then.
  */
 export function resolveCredentials(
   option: Credentials | CredentialProvider | undefined,
-  [idVar, secretVar, tokenVar]: CredentialEnv
+  envSets: CredentialEnv[]
 ): CredentialProvider {
   if (typeof option === 'object') return () => Promise.resolve(option);
 
   const provider: CredentialProvider =
     option ??
     (async () => {
-      const accessKeyId = process.env[idVar];
-      const secretAccessKey = process.env[secretVar];
-      if (!accessKeyId || !secretAccessKey) {
-        throw new ValidationError(`No credentials: pass the credentials option or set ${idVar} and ${secretVar}`);
+      for (const [idVar, secretVar, tokenVar] of envSets) {
+        const accessKeyId = process.env[idVar];
+        const secretAccessKey = process.env[secretVar];
+        if (accessKeyId && secretAccessKey) {
+          return { accessKeyId, secretAccessKey, sessionToken: process.env[tokenVar] || undefined };
+        }
       }
-      return { accessKeyId, secretAccessKey, sessionToken: process.env[tokenVar] || undefined };
+      const names = envSets.map(([idVar, secretVar]) => `${idVar} and ${secretVar}`).join(', or ');
+      throw new ValidationError(`No credentials: pass the credentials option or set ${names}`);
     });
 
   let cached: Promise<Credentials> | undefined;

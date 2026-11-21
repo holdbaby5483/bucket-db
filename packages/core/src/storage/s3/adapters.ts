@@ -24,7 +24,7 @@ export interface OSSAdapterOptions {
   region?: string;
   /** S3-compatible endpoint. Default: `https://s3.oss-<region>.aliyuncs.com`. */
   endpoint?: string;
-  /** Default: `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`. */
+  /** Default: `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`, else the `ALIBABA_CLOUD_*` equivalents. */
   credentials?: Credentials | CredentialProvider;
   /** Per-attempt timeout; default 10000. */
   timeoutMs?: number;
@@ -72,11 +72,7 @@ export class S3Adapter extends S3Client {
       region,
       endpoint:
         options.endpoint ?? (env.AWS_ENDPOINT_URL_S3 || env.AWS_ENDPOINT_URL || `https://s3.${region}.amazonaws.com`),
-      credentials: resolveCredentials(options.credentials, [
-        'AWS_ACCESS_KEY_ID',
-        'AWS_SECRET_ACCESS_KEY',
-        'AWS_SESSION_TOKEN',
-      ]),
+      credentials: resolveCredentials(options.credentials, [['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']]),
     });
     super(resolved, AWS_DIALECT);
   }
@@ -93,10 +89,10 @@ export class OSSAdapter extends S3Client {
       ...options,
       region,
       endpoint: options.endpoint ?? `https://s3.oss-${region}.aliyuncs.com`,
+      // ossutil's names first, then the Alibaba Cloud CLI / OIDC action's
       credentials: resolveCredentials(options.credentials, [
-        'OSS_ACCESS_KEY_ID',
-        'OSS_ACCESS_KEY_SECRET',
-        'OSS_SESSION_TOKEN',
+        ['OSS_ACCESS_KEY_ID', 'OSS_ACCESS_KEY_SECRET', 'OSS_SESSION_TOKEN'],
+        ['ALIBABA_CLOUD_ACCESS_KEY_ID', 'ALIBABA_CLOUD_ACCESS_KEY_SECRET', 'ALIBABA_CLOUD_SECURITY_TOKEN'],
       ]),
     });
     super(resolved, OSS_DIALECT);

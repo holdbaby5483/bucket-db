@@ -2,6 +2,7 @@ import type { Document, Logger } from './types.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { Collection } from './collection.js';
 import { validateDbPath } from './keys.js';
+import { openUrl } from './url.js';
 
 export interface BucketDBOptions {
   /** Receives snapshot write failures and envelope warnings. Default: console.warn. */
@@ -20,6 +21,16 @@ export class BucketDB {
     private readonly options: BucketDBOptions = {}
   ) {
     validateDbPath(dbPath);
+  }
+
+  /**
+   * Opens a database from a connection URL, by default `BUCKET_DB_URL`:
+   * `s3://bucket/prefix?region=…`, `oss://bucket/prefix?region=…`,
+   * `file:///dir` or `memory://`. Credentials come from the environment, never the URL.
+   */
+  static connect(url?: string, options: BucketDBOptions = {}): BucketDB {
+    const { adapter, dbPath } = openUrl(url);
+    return new BucketDB(adapter, dbPath, options);
   }
 
   /** Returns the same Collection instance for the same name. */
