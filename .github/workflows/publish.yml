@@ -24,7 +24,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.4.2
 
       - name: Install dependencies
         run: bun install
@@ -36,9 +36,16 @@ jobs:
       - name: Run tests
         run: bun test
 
+      - name: Size and dependency gates
+        run: packages/core/scripts/check-budget.sh
+
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          # 0.4.0-beta.0 and the like must not become the "latest" dist-tag
+          if [[ "$VERSION" == *-* ]]; then echo "PRERELEASE=true" >> $GITHUB_OUTPUT; else echo "PRERELEASE=false" >> $GITHUB_OUTPUT; fi
 
       - name: Update package version
         run: |
@@ -48,7 +55,7 @@ jobs:
 
       - name: Publish @hold-baby/bucket-db
         working-directory: packages/core
-        run: npm publish --access public
+        run: npm publish --access public ${{ steps.version.outputs.PRERELEASE == 'true' && '--tag next' || '' }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -69,4 +76,4 @@ jobs:
             bun add @hold-baby/bucket-db
             ```
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.PRERELEASE == 'true' }}

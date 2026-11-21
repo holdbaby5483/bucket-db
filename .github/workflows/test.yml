@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  BUN_VERSION: 1.4.2
+
 jobs:
   unit-test:
-    name: Unit Tests
+    name: Unit tests, examples and size gates
     runs-on: ubuntu-latest
 
     steps:
@@ -18,7 +21,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install
@@ -29,8 +32,47 @@ jobs:
       - name: Run unit tests
         run: bun test
 
+      - name: Run examples
+        run: |
+          for example in basic-usage local-storage dbpath-demo; do
+            (cd "examples/$example" && bun run index.ts)
+          done
+
+      - name: Size and dependency gates
+        run: packages/core/scripts/check-budget.sh
+
+  node:
+    name: Node ${{ matrix.node }} smoke test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build core
+        run: bun run --cwd packages/core build
+
+      - name: Run the built package on Node
+        run: node packages/core/scripts/node-smoke.mjs
+
   integration-test:
-    name: Integration Tests (OSS)
+    name: Conformance on real OSS
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
 
@@ -41,18 +83,15 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install
 
-      - name: Build packages
-        run: bun run build
-
-      - name: Run OSS integration tests
+      - name: Run conformance and multi-process tests against OSS
         env:
           OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
           OSS_REGION: ${{ secrets.OSS_REGION }}
           OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
           OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-        run: bun test packages/core/tests/storage/oss-adapter.test.ts
+        run: bun test packages/core/tests/conformance/real-buckets.test.ts packages/core/tests/core/multiprocess.test.ts
