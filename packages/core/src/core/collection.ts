@@ -8,7 +8,7 @@ import type {
   UpdateOptions,
   StorageAdapter,
 } from '../types/index.js';
-import { DocumentNotFoundError, ConcurrentUpdateError } from '../types/index.js';
+import { DocumentNotFoundError, ConcurrentUpdateError, StorageError } from '../types/index.js';
 import { ShardManager } from '../index/shard-manager.js';
 import { sanitizePathComponent, safePathJoin } from '../utils/path-validator.js';
 import { WAL, type WALEntry } from './wal.js';
@@ -219,29 +219,33 @@ export class Collection<T extends Document> implements ICollection<T> {
       timestamp: now(),
     });
 
+    // 2. Write document; a failed precondition means another writer changed it since our read
+    let etag: string;
     try {
-      // 2. Write document
-      const { etag } = await this.adapter.put(
+      ({ etag } = await this.adapter.put(
         this.getDocPath(id),
         updated,
         current._etag ? { ifMatch: current._etag } : undefined
-      );
-
-      updated._etag = etag;
-
-      // 3. Update index
-      await this.shardManager.updateDocument(updated);
-
-      // 4. Clear WAL entry
-      await this.wal.clear(id);
-
-      // 5. Invalidate query cache (document changed)
-      this.queryCache.invalidate();
-
-      return updated;
+      ));
     } catch (error) {
+      if (error instanceof StorageError && error.message.includes('PreconditionFailed')) {
+        throw new ConcurrentUpdateError(`Document ${id} was modified by another writer`);
+      }
       throw error;
     }
+
+    updated._etag = etag;
+
+    // 3. Update index
+    await this.shardManager.updateDocument(updated);
+
+    // 4. Clear WAL entry
+    await this.wal.clear(id);
+
+    // 5. Invalidate query cache (document changed)
+    this.queryCache.invalidate();
+
+    return updated;
   }
 
   async delete(id: string): Promise<void> {

@@ -79,7 +79,8 @@ export class S3Adapter implements StorageAdapter {
         etag: response.ETag?.replace(/"/g, '') || '',
       };
     } catch (error: any) {
-      if (error.name === 'PreconditionFailed') {
+      // Concurrent conditional writes to one key fail with 409 ConditionalRequestConflict, not 412
+      if (error.name === 'PreconditionFailed' || error.name === 'ConditionalRequestConflict') {
         throw new StorageError('PreconditionFailed: ETag mismatch');
       }
       throw new StorageError(`Failed to put object: ${error.message}`, error);
