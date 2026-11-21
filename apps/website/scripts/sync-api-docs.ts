@@ -102,7 +102,7 @@ function splitSections(content: string): Map<string, string> {
 function generateIndexPage(sections: Map<string, string>) {
   const content = `# API 参考
 
-BucketDB 完整的 API 文档。
+BucketDB 0.4.0-beta.0 完整的 API 文档。从 0.3.x 升级请先阅读[升级指南](/guide/migration)。
 
 ## 快速导航
 
@@ -115,7 +115,7 @@ BucketDB 完整的 API 文档。
 ## 安装
 
 \`\`\`bash
-bun add @hold-baby/bucket-db
+bun add @hold-baby/bucket-db@next
 \`\`\`
 
 ## 基础用法
@@ -129,10 +129,7 @@ interface User extends Document {
   email: string;
 }
 
-const db = new BucketDB(
-  new FileSystemAdapter({ basePath: './data' }),
-  'my-app'
-);
+const db = new BucketDB(new FileSystemAdapter({ basePath: './data' }), 'my-app');
 
 const users = db.collection<User>('users');
 
@@ -144,25 +141,25 @@ const all = await users.find({});
 
 ### BucketDB
 
-主数据库类,管理集合和配置。
+入口类:存储后端加上一个 key 前缀(\`dbPath\`,\`''\` 表示 bucket 根目录)。
 
 \`\`\`typescript
-const db = new BucketDB(adapter, dbPath, options);
-const collection = db.collection<T>(name, options);
+const db = new BucketDB(adapter, dbPath);
+const collection = db.collection<T>(name);
 \`\`\`
 
 详见 [BucketDB API](./bucketdb)。
 
 ### Collection
 
-集合类,提供 CRUD 操作。
+集合类,提供 CRUD 操作。每个文档是一个对象:\`<dbPath>/<collection>/docs/<id>.json\`。
 
 \`\`\`typescript
-await collection.insert(data);
-await collection.findById(id);
-await collection.find(filter, options);
-await collection.update(id, data, options);
-await collection.delete(id);
+await collection.insert(data);              // 1 次条件 PUT
+await collection.findById(id);              // 1 次 GET;仅在文档不存在时返回 null
+await collection.find(filter, options);     // LIST + 读取全部文档,内存中过滤
+await collection.update(id, data, options); // GET + 条件 PUT
+await collection.delete(id);                // 1 次 DELETE;文档不存在也不报错
 \`\`\`
 
 详见 [Collection API](./collection)。
@@ -171,22 +168,32 @@ await collection.delete(id);
 
 - **MemoryStorageAdapter** - 内存存储(测试)
 - **FileSystemAdapter** - 本地文件系统
-- **S3Adapter** - AWS S3(原生条件写入;SDK 默认重试,最多尝试 3 次,覆盖 5xx/429/网络错误)
-- **OSSAdapter** - 阿里云 OSS(条件写入为 HEAD + PUT 模拟,非原子;仅重试网络错误和超时,5xx/429 不重试)
+- **S3Adapter** - AWS S3 及 S3 兼容服务(内置客户端,无运行时依赖;区域、端点、凭证可从 \`AWS_*\` 环境变量读取)
+- **OSSAdapter** - 阿里云 OSS,经 S3 兼容端点访问(区域、凭证可从 \`OSS_*\` 环境变量读取;不支持条件更新)
+
+S3 与 OSS 每个请求最多尝试 3 次,单次超时默认 10 秒,重试网络错误、超时、5xx、429、\`SlowDown\`、\`RequestTimeout\`。
 
 详见 [存储适配器 API](./adapters)。
 
+## 各后端保证
+
+| | Memory | FileSystem | S3 | OSS |
+|---|---|---|---|---|
+| 单次写入原子 | 是 | 是 | 是 | 是 |
+| 不存在才创建(\`insert\`) | 是 | 是(跨进程) | 是 | 是(仅限未开启版本控制的 bucket) |
+| 条件更新(\`etag\`) | 是 | 仅单进程 | 是 | 否,抛 \`UnsupportedError\` |
+| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否(后写覆盖) |
+
+所有后端都支持多个进程并发 \`insert\` / \`delete\`;\`update\` 的多进程并发仅 S3 支持(Memory、FileSystem 限单进程内)。
+
 ## 使用限制
 
-当前版本(0.3.x)存在以下限制:
-
-1. **仅支持单写入者** - 每个集合只使用一个写入进程。不支持多个实例/进程写入同一集合:一个实例的 WAL 恢复可能重放并清除另一个运行中实例的未完成操作,且 OSS 的条件写入不是原子的。
-   - **OSS 上一次只能有一个写入** - 即使在同一进程内,OSS 上的并发写入也不安全:在真实 bucket 上测试,向新集合并发 20 次 \`insert\` 全部成功返回,但 \`find({})\` 只返回 16 条(索引条目被静默丢失);用同一 \`etag\` 并发 10 次 \`update\` 全部成功。请等待每次 \`insert\` / \`update\` / \`delete\` 完成后再发起下一次。
-   - **S3、FileSystem、Memory 上**,同一进程内的并发写入会被检测到而不会丢失,但竞争激烈时,写入可能在索引分片尝试 3 次后以 \`StorageError\`("PreconditionFailed")失败。被拒绝的 \`insert\` / \`update\` 可能已写入文档;其 WAL 条目会保留,并可能在下次构造 \`Collection\` 时被重放进索引。
-2. **WAL 不提供恢复保证** - WAL 只重放索引条目,从不重放文档。写入过程中崩溃可能导致索引与文档不一致(例如索引中存在从未写入的文档,或已删除的文档仍能被 \`findById\` 读到)。恢复在构造 \`Collection\` 时于后台运行,且不会被等待。
-3. **OSS 没有原子条件写入** - \`OSSAdapter\` 用"先 HEAD 再 PUT"模拟 \`ifMatch\` / \`ifNoneMatch\`,两个并发写入者(即使在同一进程内)可能同时通过检查;在 OSS 上带 \`etag\` 的 \`update\` 无法阻止并发覆盖,并发写入还可能丢失索引条目。需要乐观锁请使用 S3。
-4. **\`findById\` 读取失败时返回 \`null\`** - 文档不存在时返回 \`null\`,目前存储读取失败(如网络、权限错误)时也返回 \`null\`。
-5. **没有规模基准测试** - 不承诺任何文档数量上限。成本模型:每个文档存为 \`<dbPath>/<collection>/docs/<id>.json\`;分片索引(默认 16 个分片,\`index/shard-XX.json\`)保存每个文档的完整副本;WAL(\`wal/\`)记录每次写入。每次写入都会重写一整个索引分片;每次非 \`id\` 条件的 \`find\` 都会下载所有非空分片。没有查询缓存,每次 \`find\` 都读取存储。
+1. **没有事务** - 每次写入只涉及一个文档。
+2. **每次 \`find\` 都读取全部文档** - 只有 \`{ id: '...' }\` 查询只读一个文档。尚无基准测试(计划在 0.4.0 提供),不承诺任何容量;适用于小集合(数千个文档)、每秒几次写入。
+3. **OSS 不支持条件更新** - 带 \`etag\` 的 \`update\` 抛 \`UnsupportedError\`;不带 \`etag\` 的并发 \`update\` 后写覆盖。
+4. **FileSystem 的条件更新仅限单进程** - \`etag\` 校验和并发更新合并只在同一进程内成立。
+5. **0.3.x 与 0.4 不能同时写同一个集合** - 0.3 只读自己的索引,看不到 0.4 的写入。
+6. **Beta** - 0.4.0 正式版之前 API 仍可能调整。
 
 ## 类型系统
 
@@ -201,14 +208,15 @@ BucketDB 提供完整的 TypeScript 类型:
 
 ## 错误处理
 
-以下错误类继承自 \`BucketDBError\`:
+以下错误类都继承自 \`BucketDBError\`:
 
-- \`DocumentNotFoundError\` - \`update\` / \`delete\` 的文档不存在(\`findById\` 返回 \`null\`,不抛出)
-- \`ConcurrentUpdateError\` - \`update\` 传入的 \`etag\` 已过期,或在 \`update\` 读取与写入之间文档被其他写入者修改;\`delete\` 没有 \`etag\` 参数,不会抛出此错误
-- \`ValidationError\` - 已导出,但当前版本不会抛出
-- \`StorageError\` - 底层存储失败
+- \`ValidationError\` - 集合名、文档 ID、\`dbPath\` 或查询条件不合法;适配器参数不合法;缺少凭证
+- \`DocumentNotFoundError\` - \`update\` 的文档不存在(\`findById\` 返回 \`null\`,\`delete\` 直接成功)
+- \`ConcurrentUpdateError\` - \`update\` 的 \`etag\` 已过期、带 \`etag\` 时写入竞争失败,或不带 \`etag\` 时重试 5 次后仍冲突
+- \`UnsupportedError\` - 后端不具备所需能力(OSS 上带 \`etag\` 的 \`update\`)
+- \`StorageError\` - 底层存储失败,带 \`kind\`(\`'not-found'\` / \`'conflict'\` / \`'transient'\` / \`'permanent'\`)、\`key\`、\`status\`
 
-非法的集合名或文档 ID 会抛出 \`PathValidationError\`,它未被导出,且继承自 \`Error\` 而非 \`BucketDBError\`。
+集合名、文档 ID 和 \`dbPath\` 的每一段须为 1-255 个字母、数字、\`_\`、\`-\` 或 \`.\`,且不能以 \`.\` 开头;不合规直接抛 \`ValidationError\`,不会改写。
 
 详见 [错误类 API](./errors)。
 `;

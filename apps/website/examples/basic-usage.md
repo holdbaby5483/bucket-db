@@ -1,11 +1,11 @@
 # 基础用法示例
 
-完整的 CRUD 操作示例，展示 BucketDB 的基本功能。
+完整的 CRUD 操作示例，展示 BucketDB 0.4 的基本功能。
 
 ## 完整代码
 
 ```typescript
-import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+import { BucketDB, MemoryStorageAdapter, ConcurrentUpdateError } from '@hold-baby/bucket-db';
 import type { Document } from '@hold-baby/bucket-db';
 
 // 1. 定义文档类型
@@ -104,13 +104,17 @@ async function main() {
       );
       console.log('Updated Bob with optimistic locking');
     } catch (error) {
-      console.log('Concurrent update detected');
+      if (error instanceof ConcurrentUpdateError) {
+        console.log('Concurrent update detected');
+      } else {
+        throw error;
+      }
     }
   }
 
   console.log('\n=== 删除文档 ===');
 
-  // 12. 删除文档
+  // 12. 删除文档（幂等：文档不存在也不会报错）
   await users.delete(charlie.id);
   console.log('Deleted Charlie');
 
@@ -126,6 +130,8 @@ main().catch(console.error);
 ```
 
 ## 运行结果
+
+ID 是随机 UUID；`find` 结果按 ID（存储键）排序，而不是插入顺序，因此数组顺序和分页内容每次运行可能不同。下面是一次可能的输出：
 
 ```
 === 插入文档 ===
@@ -210,11 +216,17 @@ await users.insert({
 
 ### 4. 乐观锁
 
-使用 ETag 防止并发更新冲突：
+使用 ETag 防止并发更新冲突，ETag 不匹配时抛出 `ConcurrentUpdateError`：
 
 ```typescript
 await users.update(id, updates, { etag: current._etag });
 ```
+
+Memory、S3 支持条件更新；FileSystem 仅在单进程内有效；OSS 不支持，传入 `etag` 会抛出 `UnsupportedError`。不传 `etag` 时，在支持条件写入的后端上 `update` 会自动重试合并，并发更新不同字段都会生效。
+
+### 5. 查询成本
+
+除 `{ id: '...' }` 外，每次 `find` 都会列出并读取集合中的全部文档，再在内存中过滤和分页。BucketDB 面向小集合（数千条文档）和低写入频率的场景。
 
 ## 下一步
 

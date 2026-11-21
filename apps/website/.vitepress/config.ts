@@ -14,7 +14,7 @@ export default defineConfig({
       { text: 'API', link: '/api/' },
       { text: '示例', link: '/examples/' },
       {
-        text: 'v0.3.2',
+        text: 'v0.4.0-beta.0',
         items: [
           { text: 'GitHub', link: 'https://github.com/holdbaby5483/bucket-db' },
           { text: 'Changelog', link: 'https://github.com/holdbaby5483/bucket-db/releases' },
@@ -29,6 +29,7 @@ export default defineConfig({
           items: [
             { text: '快速开始', link: '/guide/' },
             { text: '安装指南', link: '/guide/installation' },
+            { text: '从 0.3 升级', link: '/guide/migration' },
           ]
         },
         {

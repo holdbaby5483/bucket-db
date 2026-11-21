@@ -1,6 +1,6 @@
 # 查询语法
 
-BucketDB 提供 8 种查询操作符，支持灵活的文档查询。
+BucketDB 提供 8 种查询操作符：`$eq`、`$ne`、`$gt`、`$gte`、`$lt`、`$lte`、`$in`、`$nin`。查询在客户端内存中执行，执行方式见[查询如何执行](#查询如何执行)。
 
 ## 基础查询
 
@@ -184,69 +184,106 @@ for await (const page of paginateAll({ status: 'active' })) {
 }
 ```
 
+## 查询如何执行
+
+BucketDB 没有索引。`find` 的执行过程是：
+
+1. LIST 集合的 `docs/` 前缀（每 1000 个文档一次请求）
+2. GET **每一个**文档（最多 16 个并行）
+3. 在内存中过滤
+4. 对过滤后的结果应用 `offset` / `limit`
+
+例外：如果过滤条件中的 `id` 是一个普通字符串（`{ id: '...' }`），只读取这一个文档。
+
+结果按存储键顺序返回，也就是按 `id` 顺序。自动生成的 ID 是随机 UUID，所以**不是插入顺序**。目前不支持 `sort`，需要排序时请在应用层对结果排序。
+
+在 LIST 与 GET 之间被删除的文档会被跳过。
+
+## 匹配规则
+
+- 多个字段、同一字段的多个操作符之间都是 AND 关系
+- 文档**没有**某个字段时，该字段上的任何条件都不匹配（包括 `$ne` 和 `$nin`）
+- 等值比较使用严格相等（`===`），对象和数组不做深度比较
+- `$in: []` 不匹配任何文档
+- `$nin: []` 匹配所有拥有该字段的文档
+- `$gt` / `$gte` / `$lt` / `$lte` 只比较 number 或 string，且文档值与操作数类型必须一致
+
+## 查询校验
+
+以下情况会抛出 `ValidationError`：
+
+- 字段名为保留名称：`__proto__`、`constructor`、`prototype`、`toString`、`valueOf`、`hasOwnProperty`、`isPrototypeOf`、`propertyIsEnumerable`
+- 未知操作符（如 `$regex`）
+- `$in` / `$nin` 的操作数不是数组
+- 比较操作符的类型不匹配（如文档中 `age` 是字符串而查询用数字），或比较的值不是 number / string；这一项在过滤到具体文档时才检查
+
+```typescript
+import { ValidationError } from '@hold-baby/bucket-db';
+
+try {
+  await collection.find({ status: { $in: 'active' } } as any);
+} catch (error) {
+  if (error instanceof ValidationError) {
+    console.error('查询条件无效:', error.message);
+  }
+}
+```
+
+`{ id: 'bad/id' }` 这类不合法的 ID 不会报错，直接返回 `[]`。
+
 ## 查询最佳实践
 
 ### 1. 能按 ID 查就按 ID 查
 
-只有 `id` 等值条件能缩小索引读取范围；其他任何条件（包括空过滤）都会下载所有非空索引分片，再在内存中过滤：
+只有 `id` 等值条件能避免读取整个集合；其他任何条件（包括空过滤）都会读取集合中的每个文档：
 
 ```typescript
-// ✅ 只读取一个文档
+// ✅ 1 次 GET
 const user = await collection.findById('user-123');
 
-// ✅ 只读取一个索引分片
+// ✅ 只读取这一个文档
 const users = await collection.find({ id: 'user-123' });
 
-// ⚠️ 下载整个索引（每个文档的完整副本），再在内存中过滤
+// ⚠️ LIST + 读取集合中的每个文档，再在内存中过滤
 const active = await collection.find({ status: 'active' });
 ```
 
-### 2. 具体条件减少的是读取的文档数
+### 2. 条件越具体，返回越少，但读取量不变
 
-过滤（并应用 `offset` / `limit`）后，BucketDB 会读取每个匹配的文档文件。更具体的条件能减少这一步读取的文档数量，但不会减少索引下载量：
+无论条件选择性如何，非 `id` 查询都会读取全部文档。更具体的条件只减少返回给你的结果数量。
 
-```typescript
-// 匹配的文档少，后续读取的文档文件也少
-const user = await collection.find({ email: 'alice@example.com' });
+### 3. 分页减少返回量，不减少读取量
 
-// 匹配的文档多，后续需要读取更多文档文件
-const users = await collection.find({ status: 'active' });
-```
-
-### 3. 合理使用分页
-
-大结果集必须使用分页：
+`offset` / `limit` 在过滤之后应用，所以分页不会减少存储读取：
 
 ```typescript
-// ✅ 好：分页获取
+// 返回 100 条，但仍读取了集合中的所有文档
 const page = await collection.find({}, { limit: 100, offset: 0 });
-
-// ❌ 差：一次获取所有（可能数万条）
-const all = await collection.find({});
 ```
 
-### 4. 避免过度过滤
+上面的迭代器模式每一页都会重新读取整个集合。需要遍历全部结果时，直接调用一次 `find` 更省请求。
 
-`id` 等值已经唯一确定文档，其他条件不会带来额外收益：
+### 4. 避免多余条件
+
+`id` 等值已经唯一确定文档，其他条件不会减少读取量：
 
 ```typescript
 // ✅ 好：只用必要条件
 const users = await collection.find({ id: 'user-123' });
 
-// ❌ 差：id 已经唯一，其他条件多余
+// ❌ 多余：id 已经唯一
 const users = await collection.find({
   id: 'user-123',
-  status: 'active',  // 多余
-  age: { $gte: 0 }   // 多余
+  status: 'active',
+  age: { $gte: 0 }
 });
 ```
 
 ## 性能提示
 
-- **按 ID 查找** - `findById` 或 `{ id: '...' }` 只读取一个文档或一个分片；其他任何过滤条件都会下载所有非空索引分片（每个文档的完整副本），与条件的选择性无关
-- **分页** - `limit` / `offset` 能减少过滤后读取的文档数量，但索引仍会被完整下载
-- **分片数量** - 分片数量影响单次写入重写的分片大小，不影响查询下载的总数据量（见[核心概念](./concepts)中的"索引分片"）
-- **缓存结果** - BucketDB 没有查询缓存，每次 `find` 都读取存储；对频繁查询的结果可在应用层缓存
+- **按 ID 查找** - `findById` 或 `{ id: '...' }` 只读取一个文档；其他任何查询的成本都是 LIST + 读取集合中每个文档
+- **集合规模** - BucketDB 适合小集合（数千个文档）；目前没有基准测试数据
+- **缓存结果** - BucketDB 不缓存，每次 `find` 都读取存储；对频繁查询的结果可在应用层缓存
 
 ## 类型安全
 

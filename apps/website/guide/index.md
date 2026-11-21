@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-bun add @hold-baby/bucket-db
+bun add @hold-baby/bucket-db@next
 ```
 
 详见[安装指南](./installation)了解更多安装方式。
@@ -52,7 +52,7 @@ const db = new BucketDB(
 const users = db.collection<User>('users');
 ```
 
-集合类似于传统数据库的表,用于组织同类文档。
+集合类似于传统数据库的表,用于组织同类文档。集合名只能包含字母、数字、`_`、`.`、`-`,且不能以 `.` 开头,否则抛出 `ValidationError`。
 
 ### 4. 插入文档
 
@@ -77,12 +77,12 @@ console.log(alice);
 // }
 ```
 
-系统字段会自动添加到返回的文档中。
+系统字段会自动添加到返回的文档中。每个文档存为一个对象:`my-app/users/docs/<id>.json`。
 
 ### 5. 查询文档
 
 ```typescript
-// 按 ID 查找
+// 按 ID 查找(文档不存在时返回 null)
 const user = await users.findById(alice.id);
 
 // 等值查询
@@ -112,21 +112,23 @@ const updated = await users.update(alice.id, {
   age: 26
 });
 
-// 使用乐观锁
-const updated = await users.update(
-  alice.id,
-  { age: 26 },
-  { etag: alice._etag }
+// 使用乐观锁:文档已被他人修改时抛出 ConcurrentUpdateError
+const locked = await users.update(
+  updated.id,
+  { age: 27 },
+  { etag: updated._etag }
 );
 ```
 
-更新操作是部分更新,只修改指定的字段。
+更新操作是部分更新,只修改指定的字段;`id`、`_etag`、`_createdAt`、`_updatedAt` 不能被更新。OSS 不支持带 `etag` 的更新(抛出 `UnsupportedError`),详见[核心概念](./concepts)。
 
 ### 7. 删除文档
 
 ```typescript
 await users.delete(alice.id);
 ```
+
+`delete` 是幂等的:文档不存在时也不会报错。
 
 ## 完整示例
 
@@ -195,3 +197,4 @@ main().catch(console.error);
 - [核心概念](./concepts) - 理解数据库、集合、文档等概念
 - [查询语法](./queries) - 所有查询操作符详解
 - [API 参考](/api/) - 完整的 API 文档
+- [从 0.3 升级](./migration) - 0.3.x 用户的升级指南

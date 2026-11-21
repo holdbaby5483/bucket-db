@@ -5,6 +5,53 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta.0] - 2026-11-21
+
+Rewrites the storage core. Each document is one object, `<dbPath>/<collection>/docs/<id>.json`, with no index and no write-ahead log; every write is a single storage request. The S3 / OSS client is built in, and the package has no runtime dependencies. 0.4 reads 0.3 collections without conversion. See [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md) for the upgrade steps.
+
+### BREAKING
+
+- `shardCount` and `defaultShardCount` are removed: `new BucketDB(adapter, dbPath)`, `db.collection(name)`.
+- The query result cache is removed for good (it was already off in 0.3.2); every `find` reads storage.
+- `delete` no longer throws `DocumentNotFoundError` for a missing document; it is idempotent.
+- Invalid collection names, document IDs and `dbPath` segments throw `ValidationError` instead of being rewritten (`a/b` used to become `a_b`). Names must match `^[A-Za-z0-9_.-]{1,255}$` and not start with `.`. `PathValidationError` is removed.
+- `findById` returns `null` only when the document does not exist; other storage failures throw `StorageError`.
+- The `StorageAdapter` interface is replaced: bodies are bytes, adapters declare `capabilities`, `list` is paginated and returns etags, and `exists` / `listKeys` / `batchGet` are gone. Custom adapters must be rewritten.
+- `StorageError` gains `kind` (`'not-found' | 'conflict' | 'transient' | 'permanent'`), `key` and `status`; its second constructor argument is now an options object `{ kind?, key?, status?, cause? }`.
+- `S3Adapter` / `OSSAdapter` constructors: `region` and `credentials` are optional and default to the standard `AWS_*` / `OSS_*` environment variables. `OSSAdapter`'s `endpoint` is now OSS's S3-compatible endpoint (default `https://s3.oss-<region>.aliyuncs.com`), and `region` is written `cn-hangzhou` (`oss-cn-hangzhou` is still accepted).
+- On OSS, `update` with `etag` throws `UnsupportedError`; OSS has no conditional update.
+- `UpdateDocument<T>` excludes `_etag`, `_createdAt` and `_updatedAt` as well as `id`; `update` drops them at runtime.
+- Exported types `StorageObject`, `PutOptions`, `StorageCredentials`, `StorageAdapterConfig`, `ICollection`, `CollectionMeta` and `IndexShard` are removed.
+- Requires Node.js >= 20 or Bun.
+
+### Added
+
+- New exports: `UnsupportedError`, `Capabilities`, `Guarantee`, `WriteCondition`, `ObjectEntry`, `ListPage`, `ListOptions`, `S3AdapterOptions`, `OSSAdapterOptions`, `Credentials`, `CredentialProvider`, `FileSystemAdapterConfig`, `StorageErrorKind`, `StorageErrorOptions`.
+- `credentials` accepts a `sessionToken`, or an async function; the function is called again 5 minutes before the `expiresAt` it returns.
+- `S3Adapter` options `forcePathStyle` (automatic for IP and `localhost` endpoints) and `timeoutMs` (per attempt, default 10 s); `OSSAdapter` option `timeoutMs`.
+- Multiple writer processes are supported for `insert` and `delete` on every backend and for `update` on S3. Tested with 4 processes × 25 inserts on FileSystem, S3 and OSS: all 100 documents visible.
+- `update` without `etag` retries conflicting writes (up to 5 retries) on Memory, FileSystem (within one process) and S3, so concurrent partial updates all apply.
+
+### Changed
+
+- `insert` is one conditional PUT (6 requests in 0.3); `findById` one GET; `delete` one DELETE; `update` one GET plus one conditional PUT.
+- `find` lists the collection (one LIST per 1000 documents) and reads every document, 16 in parallel; `{ id: '...' }` reads one document. Results are in key (document ID) order.
+- S3 and OSS share one retry policy: up to 3 attempts on network errors, timeouts, 5xx, 429, `SlowDown` and `RequestTimeout`. OSS now retries 5xx and 429. A conditional write that sees a conflict after a transient failure checks whether its own earlier attempt succeeded instead of reporting a false conflict.
+- `FileSystemAdapter` writes through a temporary file and `link()` / `rename()`; create-if-absent is atomic across processes. It no longer writes `.meta` files.
+- Malformed filters (reserved field names such as `constructor`, unknown operators, non-array `$in` / `$nin`) throw `ValidationError`.
+- A file under `docs/` that is not `<id>.json` holding a JSON object makes `find` throw `StorageError` naming the key; hidden files (starting with `.`) are ignored.
+- MCP server: S3 / OSS region and credentials variables are optional and fall back to the standard `AWS_*` / `OSS_*` variables; `db_delete` succeeds for a missing document.
+
+### Removed
+
+- Dependencies `@aws-sdk/client-s3` and `ali-oss`.
+- Index shards (`index/`), the write-ahead log (`wal/`) and `.meta` files. 0.4 ignores those left by 0.3; they can be deleted. 0.3 and 0.4 must not write the same collection concurrently, because 0.3 reads only its own index.
+
+### Fixed
+
+- Concurrent writes on OSS no longer lose documents: with no index there is nothing to lose (0.3.2 lost index entries under concurrent inserts).
+- `update` with `etag` on OSS no longer appears to succeed while being unenforced; it throws `UnsupportedError`.
+
 ## [0.3.2] - 2026-11-21
 
 Stops silent data loss in the index and stops the docs from over-promising. No API or storage format changes. 0.3.x remains suitable for a single writer only; see "Status and limitations" in the README.

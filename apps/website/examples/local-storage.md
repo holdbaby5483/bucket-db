@@ -16,11 +16,11 @@ interface Todo extends Document {
   priority: 'low' | 'medium' | 'high';
 }
 
+const basePath = './local-db-data';
+
 async function main() {
   // 创建 FileSystemAdapter
-  const adapter = new FileSystemAdapter({
-    basePath: './local-db-data'
-  });
+  const adapter = new FileSystemAdapter({ basePath });
 
   const db = new BucketDB(adapter, 'todo-app');
   const todos = db.collection<Todo>('todos');
@@ -70,7 +70,7 @@ async function main() {
   });
 
   console.log('\n=== 数据已保存到本地 ===');
-  console.log('数据目录:', adapter.config.basePath);
+  console.log('数据目录:', basePath);
   console.log('重启程序后数据仍然存在');
 }
 
@@ -104,21 +104,19 @@ Pending tasks:
 
 ## 目录结构
 
-运行后会生成以下目录结构：
+每个文档对应一个 JSON 文件，路径为 `basePath/<dbPath>/<collection>/docs/<id>.json`。没有索引文件，也没有其他元数据文件：
 
 ```
 local-db-data/
 └── todo-app/
     └── todos/
-        ├── docs/
-        │   ├── a1b2c3d4-...-uuid.json
-        │   ├── e5f6g7h8-...-uuid.json
-        │   └── i9j0k1l2-...-uuid.json
-        └── index/
-            ├── shard-00.json
-            ├── shard-01.json
-            └── ...
+        └── docs/
+            ├── a1b2c3d4-...-uuid.json
+            ├── e5f6a7b8-...-uuid.json
+            └── c9d0e1f2-...-uuid.json
 ```
+
+写入时会先写临时文件 `<path>.<uuid>.tmp`，再通过 `link()`（新建）或 `rename()`（覆盖）原子替换。`find` 会忽略 `*.tmp` 文件和以 `.` 开头的隐藏文件（如 `.DS_Store`）。`docs/` 下其他不是 `<合法 id>.json` 或不是 JSON 对象的文件会让 `find` 抛出 `StorageError`（`error.key` 指明文件）。
 
 ## 文件内容示例
 
@@ -126,33 +124,16 @@ local-db-data/
 
 ```json
 {
-  "id": "a1b2c3d4-e5f6-4g7h-8i9j-0k1l2m3n4o5p",
+  "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
   "title": "学习 BucketDB",
   "completed": true,
   "priority": "high",
-  "_etag": "etag-123-1709193600000",
   "_createdAt": "2026-02-28T10:00:00.000Z",
   "_updatedAt": "2026-02-28T10:05:00.000Z"
 }
 ```
 
-### 索引分片文件（index/shard-00.json）
-
-```json
-{
-  "shardId": "00",
-  "documents": {
-    "a1b2c3d4-e5f6-4g7h-8i9j-0k1l2m3n4o5p": {
-      "id": "a1b2c3d4-e5f6-4g7h-8i9j-0k1l2m3n4o5p",
-      "title": "学习 BucketDB",
-      "completed": true,
-      "priority": "high",
-      "_etag": "etag-123-1709193600000",
-      "_updatedAt": "2026-02-28T10:05:00.000Z"
-    }
-  }
-}
-```
+`_etag` 不写入文件，读取时由存储层生成（FileSystem 下由 inode、修改时间和文件大小组成）；`id` 也以文件名为准。手动放到 `docs/<id>.json` 的 JSON 对象同样会被当作文档读取。
 
 ## 要点说明
 
@@ -171,12 +152,12 @@ const adapter = new FileSystemAdapter({
 ```typescript
 // 第一次运行
 const db1 = new BucketDB(adapter, 'todo-app');
-await db1.collection<Todo>('todos').insert({ title: 'Task 1', ... });
+await db1.collection<Todo>('todos').insert({ title: 'Task 1', completed: false, priority: 'low' });
 
 // 重启程序后
 const db2 = new BucketDB(adapter, 'todo-app');
-const todos = await db2.collection<Todo>('todos').find({});
-// todos 包含之前插入的数据
+const all = await db2.collection<Todo>('todos').find({});
+// all 包含之前插入的数据
 ```
 
 ### 3. .gitignore 配置
@@ -186,26 +167,37 @@ const todos = await db2.collection<Todo>('todos').find({});
 ```gitignore
 # .gitignore
 local-db-data/
-*.local.json
 ```
 
 ### 4. 多环境配置
 
 ```typescript
-const basePath = process.env.NODE_ENV === 'production'
-  ? '/var/lib/myapp/data'
-  : './local-db-data';
+const basePath = process.env.DATA_DIR ?? './local-db-data';
 
 const adapter = new FileSystemAdapter({ basePath });
+```
+
+### 5. 多进程
+
+- `insert` 和 `delete` 在多个进程同时写入同一集合时是安全的（`insert` 通过 `link()` 实现跨进程的"不存在才创建"）。
+- 带 `etag` 的条件更新，以及不带 `etag` 时的并发合并更新，只在单个进程内有效：比较并替换由进程内的锁串行化，多个进程同时 `update` 同一文档可能后写覆盖。
+
+### 6. 测试时使用内存适配器
+
+`MemoryStorageAdapter` 不持久化任何数据；每个测试需要干净的数据时，新建一个实例即可：
+
+```typescript
+import { MemoryStorageAdapter } from '@hold-baby/bucket-db';
+
+const db = new BucketDB(new MemoryStorageAdapter(), 'test');
 ```
 
 ## 适用场景
 
 - ✅ 本地开发和测试
-- ✅ 桌面应用
-- ✅ 单机服务器（单个写入进程）
-- ✅ Serverless Edge Functions（读取操作）
-- ❌ 多个进程或服务器写入同一集合（任何适配器都不支持多写入者）
+- ✅ 桌面应用、CLI 工具
+- ✅ 单机服务（多个进程可以同时插入、删除；更新同一文档需在单进程内完成）
+- ❌ 多台机器共享写入（请使用 [S3 / OSS 云存储](./production)）
 
 ## 下一步
 

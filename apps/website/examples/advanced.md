@@ -10,8 +10,7 @@
 
 ::: warning 注意
 - BucketDB 没有事务：下面两次 `update` 是独立的写入，第二次失败时第一次不会回滚。
-- 在 OSS 上 `etag` 检查不是原子的，无法阻止并发覆盖；需要乐观锁请使用 S3。
-- 每个集合只能有一个写入进程。
+- 条件更新（`etag`）在 Memory、S3 上可用；FileSystem 仅在单进程内有效；OSS 不支持，传入 `etag` 会抛出 `UnsupportedError`。
 :::
 
 ```typescript
@@ -63,11 +62,13 @@ async function transfer(fromId: string, toId: string, amount: number) {
 
 ### 自动重试模式
 
+不传 `etag` 时，`update` 在支持条件写入的后端（Memory、单进程内的 FileSystem、S3）上已经会自动"读取 → 合并 → 条件写入"，冲突时重试最多 5 次，适合只修改部分字段的场景。只有当新值依赖旧值（如余额加减）时，才需要自己用 `etag` 做读-改-写循环：
+
 ```typescript
 async function updateWithRetry<T extends Document>(
-  collection: any,
+  collection: Collection<T>,
   id: string,
-  updateFn: (doc: T) => Partial<T>,
+  updateFn: (doc: T) => UpdateDocument<T>,
   maxRetries: number = 3
 ): Promise<T> {
   let retries = maxRetries;
@@ -103,7 +104,17 @@ await updateWithRetry(
 );
 ```
 
+在 OSS 上这个函数会在第一次 `update` 时抛出 `UnsupportedError`。上面的片段需要导入：
+
+```typescript
+import type { Collection, UpdateDocument } from '@hold-baby/bucket-db';
+```
+
 ## 分页模式
+
+::: tip 分页成本
+`offset` / `limit` 在读取并过滤全部文档之后才应用：除 `{ id: '...' }` 外，每次 `find` 都会列出并读取集合中的所有文档，翻到第几页请求数都一样。结果按 ID（随机 UUID）排序，不是插入顺序；目前不支持 `sort` 和 `count`。BucketDB 面向小集合（数千条文档）。
+:::
 
 ### 基础分页
 
@@ -218,19 +229,23 @@ while (true) {
 
 ### 租户隔离
 
+每个租户使用不同的 `dbPath`，数据位于 `<dbPath>/<collection>/docs/` 下，互不可见。`dbPath` 的每一段都必须匹配 `^[A-Za-z0-9_.-]{1,255}$` 且不能以 `.` 开头，否则 `new BucketDB(...)` 同步抛出 `ValidationError`（不会被自动改写），所以请先校验租户 ID。
+
 ```typescript
+import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+
 class TenantDB {
-  private adapters = new Map<string, any>();
+  private adapter = new FileSystemAdapter({ basePath: './data' });
+  private dbs = new Map<string, BucketDB>();
 
   getDB(tenantId: string): BucketDB {
-    if (!this.adapters.has(tenantId)) {
-      const adapter = new FileSystemAdapter({
-        basePath: './data'
-      });
-      const db = new BucketDB(adapter, `tenant-${tenantId}`);
-      this.adapters.set(tenantId, db);
+    let db = this.dbs.get(tenantId);
+    if (!db) {
+      // 例如 tenants/tenant-a → ./data/tenants/tenant-a/users/docs/...
+      db = new BucketDB(this.adapter, `tenants/${tenantId}`);
+      this.dbs.set(tenantId, db);
     }
-    return this.adapters.get(tenantId)!;
+    return db;
   }
 }
 
@@ -294,7 +309,9 @@ app.get('/users', async (req, res) => {
 
 ## 缓存模式
 
-### 内存缓存层
+### 应用侧内存缓存层
+
+BucketDB 本身不缓存查询结果，每次调用都会访问存储。如有需要，可以在应用里自行包一层缓存（注意：多实例部署时各实例缓存互不感知）：
 
 ```typescript
 class CachedCollection<T extends Document> {
@@ -350,15 +367,15 @@ const user2 = await cachedUsers.findById('user-123'); // 从缓存
 ## 批量操作模式
 
 ::: warning 并发写入
-下面的示例用 `Promise.all` 并发写入一批文档。**在 OSS 上不要这样做**：即使在同一进程内，OSS 上的并发写入也会静默丢失索引条目，请把 `batchSize` 设为 `1`（逐个等待写入完成）。在 S3、FileSystem、Memory 上，并发写入会被检测到，但竞争激烈时某些写入可能以 `StorageError`（"PreconditionFailed"）失败，且失败前文档可能已写入，其 WAL 条目可能在下次构造 `Collection` 时被重放进索引。
+所有后端都支持并发 `insert` / `delete`。并发 `update`（不带 `etag`）在 Memory、S3 以及单进程内的 FileSystem 上会自动合并重试；在 OSS 上后写覆盖。没有事务：一批写入中途失败时，已完成的写入不会回滚。
 :::
 
 ### 批量插入
 
 ```typescript
 async function batchInsert<T extends Document>(
-  collection: any,
-  items: Omit<T, 'id' | '_etag' | '_createdAt' | '_updatedAt'>[],
+  collection: Collection<T>,
+  items: InsertDocument<T>[],
   batchSize: number = 10
 ): Promise<T[]> {
   const results: T[] = [];
@@ -390,8 +407,8 @@ console.log(`Inserted ${inserted.length} users`);
 
 ```typescript
 async function batchUpdate<T extends Document>(
-  collection: any,
-  updates: Array<{ id: string; data: Partial<T> }>,
+  collection: Collection<T>,
+  updates: Array<{ id: string; data: UpdateDocument<T> }>,
   batchSize: number = 10
 ): Promise<T[]> {
   const results: T[] = [];
@@ -474,16 +491,17 @@ interface AuditLog extends Document {
 
 class AuditedCollection<T extends Document> {
   constructor(
-    private collection: any,
-    private auditLog: any,
+    private collection: Collection<T>,
+    private entity: string,
+    private auditLog: Collection<AuditLog>,
     private userId: string
   ) {}
 
-  async insert(data: any): Promise<T> {
+  async insert(data: InsertDocument<T>): Promise<T> {
     const doc = await this.collection.insert(data);
 
     await this.auditLog.insert({
-      entity: this.collection.name,
+      entity: this.entity,
       entityId: doc.id,
       action: 'create',
       changes: data,
@@ -494,12 +512,12 @@ class AuditedCollection<T extends Document> {
     return doc;
   }
 
-  async update(id: string, data: Partial<T>): Promise<T> {
+  async update(id: string, data: UpdateDocument<T>): Promise<T> {
     const before = await this.collection.findById(id);
     const after = await this.collection.update(id, data);
 
     await this.auditLog.insert({
-      entity: this.collection.name,
+      entity: this.entity,
       entityId: id,
       action: 'update',
       changes: { before, after },
@@ -511,6 +529,8 @@ class AuditedCollection<T extends Document> {
   }
 }
 ```
+
+批量和审计示例使用的类型：`import type { Collection, InsertDocument, UpdateDocument } from '@hold-baby/bucket-db';`
 
 ## 下一步
 

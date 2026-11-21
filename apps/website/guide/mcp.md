@@ -40,7 +40,7 @@ npx @hold-baby/bucket-db-mcp
 ```bash
 BUCKET_DB_ADAPTER=oss \
 BUCKET_DB_OSS_BUCKET=my-bucket \
-BUCKET_DB_OSS_REGION=oss-cn-hangzhou \
+BUCKET_DB_OSS_REGION=cn-hangzhou \
 BUCKET_DB_OSS_ACCESS_KEY_ID=xxx \
 BUCKET_DB_OSS_SECRET_ACCESS_KEY=xxx \
 npx @hold-baby/bucket-db-mcp
@@ -54,13 +54,18 @@ npx @hold-baby/bucket-db-mcp
 | `BUCKET_DB_PATH` | | `default` | 数据库路径（类似数据库名） |
 | `BUCKET_DB_FS_BASE_PATH` | fs 必填 | — | 本地目录路径 |
 | `BUCKET_DB_S3_BUCKET` | s3 必填 | — | S3 Bucket 名称 |
-| `BUCKET_DB_S3_REGION` | s3 必填 | — | S3 区域 |
-| `BUCKET_DB_S3_ACCESS_KEY_ID` | s3 必填 | — | AWS Access Key ID |
-| `BUCKET_DB_S3_SECRET_ACCESS_KEY` | s3 必填 | — | AWS Secret Access Key |
+| `BUCKET_DB_S3_REGION` | | `AWS_REGION` → `AWS_DEFAULT_REGION` | S3 区域 |
+| `BUCKET_DB_S3_ACCESS_KEY_ID` | | `AWS_ACCESS_KEY_ID` | AWS Access Key ID |
+| `BUCKET_DB_S3_SECRET_ACCESS_KEY` | | `AWS_SECRET_ACCESS_KEY` | AWS Secret Access Key |
 | `BUCKET_DB_OSS_BUCKET` | oss 必填 | — | OSS Bucket 名称 |
-| `BUCKET_DB_OSS_REGION` | oss 必填 | — | OSS 区域 |
-| `BUCKET_DB_OSS_ACCESS_KEY_ID` | oss 必填 | — | OSS Access Key ID |
-| `BUCKET_DB_OSS_SECRET_ACCESS_KEY` | oss 必填 | — | OSS Secret Access Key |
+| `BUCKET_DB_OSS_REGION` | | `OSS_REGION` | OSS 区域，如 `cn-hangzhou` |
+| `BUCKET_DB_OSS_ACCESS_KEY_ID` | | `OSS_ACCESS_KEY_ID` | OSS Access Key ID |
+| `BUCKET_DB_OSS_SECRET_ACCESS_KEY` | | `OSS_ACCESS_KEY_SECRET` | OSS Access Key Secret |
+
+- 区域和凭证都是可选的：未设置 `BUCKET_DB_*` 变量时，回退到标准环境变量（S3 读 `AWS_*`，OSS 读 `OSS_*`），临时凭证的 token 分别来自 `AWS_SESSION_TOKEN` / `OSS_SESSION_TOKEN`
+- 只有 Access Key ID 和 Secret 同时设置时，`BUCKET_DB_*` 凭证才会生效；否则使用标准环境变量
+- 最终仍缺少区域时启动报错；缺少凭证时第一次请求报错（`ValidationError`）
+- MCP 配置没有自定义 endpoint 的变量；S3 可通过 `AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL` 指定 endpoint（如 MinIO、R2）
 
 ## 配置 Claude Desktop
 
@@ -119,7 +124,7 @@ MCP 服务器提供 5 个工具，AI 可以直接调用：
 
 ### `db_find_by_id`
 
-按 ID 查找单条文档，不存在时返回错误。
+按 ID 查找单条文档，不存在时返回错误（`Document not found`）。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
@@ -139,7 +144,9 @@ MCP 服务器提供 5 个工具，AI 可以直接调用：
 
 ### `db_update`
 
-按 ID 更新文档，支持乐观锁。
+按 ID 更新文档，支持乐观锁。文档不存在或 `etag` 冲突时返回错误。
+
+不传 `etag` 时，在 S3 和 FileSystem（单进程）上冲突会自动重新读取并重试；在 OSS 上后写覆盖。在 OSS 上传 `etag` 会返回 `UnsupportedError`。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -150,12 +157,27 @@ MCP 服务器提供 5 个工具，AI 可以直接调用：
 
 ### `db_delete`
 
-按 ID 删除文档。
+按 ID 删除文档。删除不存在的文档同样返回成功。
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `collection` | string | Collection 名称 |
 | `id` | string | 文档 ID |
+
+## 并发与保证
+
+MCP 服务器直接使用 BucketDB，保证与所选后端一致：
+
+| | Memory | FileSystem | S3 | OSS |
+|---|---|---|---|---|
+| 单次写入原子 | 是 | 是 | 是 | 是 |
+| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） |
+| 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
+| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
+
+多个进程（例如 MCP 服务器与你的应用）可以同时对同一集合执行 `insert` / `delete`；S3 上 `update` 也可以并发。不要让 0.3.x 客户端与 0.4 同时写同一集合，见[迁移指南](/guide/migration)。
+
+`db_find` 会读取集合中的每个文档（`{ "id": "..." }` 过滤除外），适合小集合。
 
 ## 使用示例
 

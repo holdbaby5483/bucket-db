@@ -1,18 +1,28 @@
 # S3 / OSS 云存储示例
 
-使用 S3 和 OSS 云存储适配器。
+使用 `S3Adapter` 和 `OSSAdapter` 把数据存到对象存储。
+
+BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何运行时依赖，需要 Node >= 20 或 Bun。`S3Adapter` 通过 `endpoint` 可以连接任何兼容 S3 的服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。
 
 ::: warning 使用前请阅读
-- 每个集合只能有一个写入进程，不支持多个实例/进程同时写入同一集合。
-- **OSS 上一次只能有一个写入**：即使在同一进程内，OSS 上的并发写入也会静默丢失索引条目（实测并发 20 次 `insert` 全部成功返回，`find({})` 只返回 16 条）。请等待每次 `insert` / `update` / `delete` 完成后再发起下一次。
-- `OSSAdapter` 的条件写入是"先 HEAD 再 PUT"的模拟，不是原子的；在 OSS 上带 `etag` 的 `update` 无法阻止并发覆盖。需要乐观锁请使用 S3。
-- S3 上同一进程内的并发写入会被检测到，但竞争激烈时可能以 `StorageError`（"PreconditionFailed"）失败，且失败前文档可能已写入。
-- 重试：S3 使用 AWS SDK 默认重试（最多尝试 3 次，覆盖 5xx/429/网络错误）；OSS 只重试网络错误和超时，5xx 与 429 不重试。
+- OSS 不支持条件更新：带 `etag` 的 `update` 会抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。需要乐观锁请使用 S3。
+- 除 `{ id: '...' }` 外，每次 `find` 都会列出并读取集合中的全部文档。适合小集合（数千条文档）和每秒少量写入。
 
-完整列表见[核心概念 - 使用限制](/guide/concepts#使用限制)。
+完整说明见[核心概念](/guide/concepts)。
 :::
 
-## AWS S3 部署
+## 一致性保证
+
+| | Memory | FileSystem | S3 | OSS |
+|---|---|---|---|---|
+| 单次写入原子 | 是 | 是 | 是 | 是 |
+| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） |
+| 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
+| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
+
+所有后端都支持多个进程同时 `insert` / `delete`；S3 上多个进程同时 `update` 也是安全的。
+
+## AWS S3
 
 ### 配置 S3Adapter
 
@@ -25,84 +35,92 @@ interface User extends Document {
   email: string;
 }
 
-// 创建 S3 适配器
+// 显式传入凭证
 const adapter = new S3Adapter({
   bucket: 'my-app-bucket',
   region: 'us-east-1',
   credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  }
+    accessKeyId: process.env.MY_S3_KEY_ID!,
+    secretAccessKey: process.env.MY_S3_SECRET!,
+  },
 });
 
-// 创建数据库实例
 const db = new BucketDB(adapter, 'my-app');
 const users = db.collection<User>('users');
 
-// 使用方式与其他适配器相同
 await users.insert({ name: 'Alice', email: 'alice@example.com' });
 const allUsers = await users.find({});
 ```
 
-### 环境变量配置
+### 使用环境变量
 
-创建 `.env` 文件：
+`region`、`endpoint`、`credentials` 都是可选的，省略时从环境变量读取：
 
 ```bash
+AWS_REGION=us-east-1             # 或 AWS_DEFAULT_REGION
 AWS_ACCESS_KEY_ID=your_access_key_id
 AWS_SECRET_ACCESS_KEY=your_secret_access_key
-AWS_REGION=us-east-1
-S3_BUCKET=my-app-bucket
+AWS_SESSION_TOKEN=...            # 可选，临时凭证
+# AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL  可选，默认 https://s3.<region>.amazonaws.com
 ```
-
-### 完整示例
 
 ```typescript
-import { BucketDB, S3Adapter } from '@hold-baby/bucket-db';
-import type { Document } from '@hold-baby/bucket-db';
-
-interface Product extends Document {
-  name: string;
-  price: number;
-  stock: number;
-  category: string;
-}
-
-async function main() {
-  // 从环境变量读取配置
-  const adapter = new S3Adapter({
-    bucket: process.env.S3_BUCKET!,
-    region: process.env.AWS_REGION || 'us-east-1',
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-    }
-  });
-
-  const db = new BucketDB(adapter, 'my-app');
-  const products = db.collection<Product>('products');
-
-  // 插入产品
-  await products.insert({
-    name: 'Laptop',
-    price: 999,
-    stock: 50,
-    category: 'electronics'
-  });
-
-  // 查询产品
-  const electronics = await products.find({ category: 'electronics' });
-  console.log(`Found ${electronics.length} electronics`);
-
-  // 分页查询
-  const page1 = await products.find({}, { limit: 20, offset: 0 });
-  console.log(`Page 1: ${page1.length} products`);
-}
-
-main().catch(console.error);
+const adapter = new S3Adapter({ bucket: 'my-app-bucket' });
 ```
 
-## 阿里云 OSS 部署
+找不到 region 时构造函数抛出 `ValidationError`；找不到凭证时在第一次请求时抛出 `ValidationError`。
+
+### 临时凭证与凭证提供函数
+
+```typescript
+import { S3Adapter } from '@hold-baby/bucket-db';
+import type { Credentials } from '@hold-baby/bucket-db';
+
+// 静态临时凭证
+const withToken = new S3Adapter({
+  bucket: 'my-app-bucket',
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: 'ASIA...',
+    secretAccessKey: '...',
+    sessionToken: '...',
+  },
+});
+
+// 异步凭证提供函数（如 STS / 自建凭证服务）
+const withProvider = new S3Adapter({
+  bucket: 'my-app-bucket',
+  region: 'us-east-1',
+  credentials: async (): Promise<Credentials> => {
+    const res = await fetch('https://auth.example.com/s3-credentials');
+    const body = await res.json();
+    return {
+      accessKeyId: body.accessKeyId,
+      secretAccessKey: body.secretAccessKey,
+      sessionToken: body.sessionToken,
+      expiresAt: new Date(body.expiration),
+    };
+  },
+});
+```
+
+提供函数的结果会被缓存，在 `expiresAt` 之前 5 分钟重新调用；没有 `expiresAt` 时不会再次调用。调用失败的结果不会被缓存。
+
+### 兼容 S3 的服务
+
+```typescript
+// 例如本地 MinIO（未经官方测试）
+const adapter = new S3Adapter({
+  bucket: 'my-app-bucket',
+  region: 'us-east-1',
+  endpoint: 'http://localhost:9000',
+  credentials: { accessKeyId: 'minioadmin', secretAccessKey: 'minioadmin' },
+});
+```
+
+当 endpoint 的主机是 IP 或 `localhost` 时自动使用 path-style 地址；也可以用 `forcePathStyle: true` / `false` 显式指定。
+
+## 阿里云 OSS
 
 ### 配置 OSSAdapter
 
@@ -116,97 +134,108 @@ interface Order extends Document {
   status: 'pending' | 'completed' | 'cancelled';
 }
 
-// 创建 OSS 适配器
 const adapter = new OSSAdapter({
   bucket: 'my-app-bucket',
-  region: 'oss-cn-hangzhou',
+  region: 'cn-hangzhou',
   credentials: {
-    accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.OSS_ACCESS_KEY_SECRET!,
-  }
+    accessKeyId: process.env.MY_OSS_KEY_ID!,
+    secretAccessKey: process.env.MY_OSS_SECRET!,
+  },
 });
 
 const db = new BucketDB(adapter, 'my-app');
 const orders = db.collection<Order>('orders');
 
-// 使用
-await orders.insert({
-  userId: 'user-123',
-  amount: 99.99,
-  status: 'pending'
-});
+await orders.insert({ userId: 'user-123', amount: 99.99, status: 'pending' });
 ```
 
-### 环境变量配置
+`region` 写 `cn-hangzhou`（0.3 的 `oss-cn-hangzhou` 写法仍然兼容）。`endpoint` 默认是 OSS 的 S3 兼容地址 `https://s3.oss-<region>.aliyuncs.com`。`credentials` 同样支持 `sessionToken` 和凭证提供函数。
+
+### 使用环境变量
 
 ```bash
+OSS_REGION=cn-hangzhou
 OSS_ACCESS_KEY_ID=your_access_key_id
 OSS_ACCESS_KEY_SECRET=your_secret_access_key
-OSS_REGION=oss-cn-hangzhou
-OSS_BUCKET=my-app-bucket
+OSS_SESSION_TOKEN=...   # 可选，STS 临时凭证
+```
+
+```typescript
+const adapter = new OSSAdapter({ bucket: 'my-app-bucket' });
+```
+
+`OSS_ENDPOINT` 不会被读取；需要自定义地址时请传 `endpoint`。
+
+::: tip 自定义域名
+中国内地的新 OSS 用户可能需要通过 `endpoint` 使用自定义域名访问。通过自定义域名走 S3 兼容接口尚未验证。
+:::
+
+### OSS 上的更新
+
+```typescript
+import { UnsupportedError } from '@hold-baby/bucket-db';
+
+// ✅ 不带 etag：普通 PUT，并发时后写覆盖
+await orders.update(orderId, { status: 'completed' });
+
+// ❌ 带 etag：不发送请求，直接抛出 UnsupportedError
+try {
+  await orders.update(orderId, { status: 'completed' }, { etag: current._etag });
+} catch (error) {
+  if (error instanceof UnsupportedError) {
+    // OSS 不支持条件更新
+  }
+}
+```
+
+## 重试与超时
+
+S3 和 OSS 适配器使用相同的重试策略：
+
+- 每个请求最多尝试 3 次，全抖动指数退避。
+- 单次尝试超时 `timeoutMs`，默认 10 000 ms。
+- 会重试：网络错误、超时、500/502/503/504、429、`SlowDown`、`RequestTimeout`。其他 4xx 不重试（`kind: 'permanent'`）。
+- 条件写入在之前的尝试失败后又收到冲突时，会重新读取对象并比较内容，不会因为自己上一次实际已成功的写入而误报冲突。
+
+```typescript
+const adapter = new S3Adapter({
+  bucket: 'my-app-bucket',
+  region: 'us-east-1',
+  timeoutMs: 5000,
+});
 ```
 
 ## 多环境配置
 
-### 环境隔离策略
-
 ```typescript
 import { BucketDB, S3Adapter, FileSystemAdapter } from '@hold-baby/bucket-db';
 
-// 根据环境选择适配器
 function createAdapter() {
-  const env = process.env.NODE_ENV || 'development';
-
-  if (env === 'production') {
-    return new S3Adapter({
-      bucket: process.env.S3_BUCKET!,
-      region: process.env.AWS_REGION!,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-      }
-    });
+  if (process.env.S3_BUCKET) {
+    // region / 凭证从 AWS_* 环境变量读取
+    return new S3Adapter({ bucket: process.env.S3_BUCKET });
   }
-
-  if (env === 'test') {
-    return new FileSystemAdapter({
-      basePath: './test-data'
-    });
-  }
-
-  // development
-  return new FileSystemAdapter({
-    basePath: './dev-data'
-  });
+  return new FileSystemAdapter({ basePath: './dev-data' });
 }
 
-// 使用不同的 dbPath 隔离环境
-const env = process.env.NODE_ENV || 'development';
+// 用 dbPath 隔离环境
+const env = process.env.APP_ENV ?? 'development';
 const db = new BucketDB(createAdapter(), env);
 ```
 
 ## 最佳实践
 
-### 1. 使用环境变量
+### 1. 不要硬编码凭证
 
 ```typescript
-// ✅ 好：从环境变量读取
-const adapter = new S3Adapter({
-  bucket: process.env.S3_BUCKET!,
-  region: process.env.AWS_REGION!,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-  }
-});
+// ✅ 好：依赖环境变量或凭证提供函数
+const adapter = new S3Adapter({ bucket: 'my-bucket' });
 
 // ❌ 差：硬编码凭证
-const adapter = new S3Adapter({
+const bad = new S3Adapter({
   bucket: 'my-bucket',
-  credentials: {
-    accessKeyId: 'AKIAXXXXXXXX',
-    secretAccessKey: 'xxxxxx',
-  }
+  region: 'us-east-1',
+  credentials: { accessKeyId: 'AKIAXXXXXXXX', secretAccessKey: 'xxxxxx' },
 });
 ```
 
@@ -219,116 +248,50 @@ try {
   await users.insert({ name: 'Alice', email: 'alice@example.com' });
 } catch (error) {
   if (error instanceof StorageError) {
-    console.error('Storage error:', error.message);
-    // 重试或降级处理
+    // kind: 'not-found' | 'conflict' | 'transient' | 'permanent'
+    console.error(error.kind, error.status, error.key, error.message);
+    // transient 表示重试后仍失败，可以稍后再试
   }
   throw error;
 }
 ```
 
-### 3. 分片配置
-
-分片数量决定单次写入需要重写的索引分片大小：分片越多，每次写入重写的数据越少；但非 `id` 条件的查询仍会下载所有非空分片，总下载量不变。分片数量创建后不可修改：
+### 3. 复用实例
 
 ```typescript
-const users = db.collection<User>('users', {
-  shardCount: 32
-});
+// ✅ 复用 adapter 和 db 实例（凭证缓存等状态在实例内共享）
+const db = new BucketDB(createAdapter(), 'my-app');
+export { db };
 ```
 
-### 4. 连接复用
+### 4. 并发写入
+
+`insert` 和 `delete` 可以并发执行：
 
 ```typescript
-// ✅ 好：复用 adapter 和 db 实例
-const adapter = createAdapter();
-const db = new BucketDB(adapter, 'my-app');
-
-export { db };  // 导出供全局使用
-
-// ❌ 差：每次创建新实例（每个实例的集合都会各自在后台运行 WAL 恢复，
-// 多个实例同时写入同一集合属于多写入者，不受支持）
-function getDB() {
-  return new BucketDB(createAdapter(), 'my-app');
-}
+await Promise.all(newUsers.map((u) => users.insert(u)));
 ```
 
-## 性能优化
+不带 `etag` 的 `update` 在 S3 上遇到冲突会自动重新读取、合并并重试（最多 5 次），并发更新同一文档的不同字段都会生效；在 OSS 上后写覆盖。
 
-### 1. 批量操作
+### 5. 分页
+
+`offset` / `limit` 在读取全部文档并过滤之后才应用，翻页不会减少请求数：
 
 ```typescript
-// 批量插入：逐个等待写入完成。
-// OSS 上并发写入会静默丢失索引条目；S3 上并发写入在竞争时可能以 StorageError 失败
-const users = [
-  { name: 'Alice', email: 'alice@example.com' },
-  { name: 'Bob', email: 'bob@example.com' },
-];
-
-for (const user of users) {
-  await collection.insert(user);
-}
+const page1 = await users.find({}, { limit: 20, offset: 0 });
 ```
 
-### 2. 并行查询
+结果按 ID（随机 UUID）排序，不是插入顺序；目前没有 `sort`。
 
-```typescript
-// 并行执行多个查询（每个非 id 查询都会下载整个索引）
-const [activeUsers, inactiveUsers] = await Promise.all([
-  users.find({ status: 'active' }),
-  users.find({ status: 'inactive' })
-]);
-```
+## 剩余限制
 
-### 3. 分页大结果集
-
-```typescript
-async function* getAllUsers() {
-  let offset = 0;
-  const limit = 100;
-
-  while (true) {
-    const batch = await users.find({}, { limit, offset });
-    if (batch.length === 0) break;
-
-    yield batch;
-    offset += batch.length;
-
-    if (batch.length < limit) break;
-  }
-}
-
-// 使用
-for await (const batch of getAllUsers()) {
-  console.log(`Processing ${batch.length} users`);
-  // 处理批次
-}
-```
-
-## 监控和日志
-
-```typescript
-import { BucketDB } from '@hold-baby/bucket-db';
-
-class MonitoredDB {
-  private db: BucketDB;
-
-  constructor(adapter: any, dbPath: string) {
-    this.db = new BucketDB(adapter, dbPath);
-  }
-
-  async insert<T>(collectionName: string, data: any): Promise<T> {
-    const start = Date.now();
-    try {
-      const result = await this.db.collection<T>(collectionName).insert(data);
-      console.log(`Insert ${collectionName}: ${Date.now() - start}ms`);
-      return result;
-    } catch (error) {
-      console.error(`Insert ${collectionName} failed:`, error);
-      throw error;
-    }
-  }
-}
-```
+1. 没有事务；每次写入只涉及一个文档。
+2. 暂无基准测试（计划在 0.4.0 提供）。除 `{ id }` 外，每次 `find` 都会列出并读取集合中的全部文档，适合小集合（数千条文档）和每秒少量写入。
+3. OSS：不支持条件更新，带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
+4. FileSystem：条件更新和并发更新合并只在单进程内有效。
+5. 0.3.x 和 0.4 客户端不能同时写同一个集合（0.3 只读取自己的索引，看不到 0.4 的写入）。详见[迁移指南](/guide/migration)。
+6. beta：0.4.0 正式版之前 API 仍可能变化（暂不支持 `sort`、`count`、自定义 ID）。
 
 ## 下一步
 

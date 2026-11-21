@@ -1,59 +1,88 @@
 # BucketDB
 
-TypeScript document database. Uses S3 / Alibaba Cloud OSS / local filesystem as backend. No database server required.
+TypeScript document database (version 0.4.0-beta.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun.
 
 ## Key concepts
 
-- `BucketDB` — main class, takes a storage adapter and a `dbPath` namespace
-- `Collection<T>` — typed collection, returned by `db.collection<T>(name)`
-- Every document extends `Document` which adds: `id` (UUID), `_etag`, `_createdAt`, `_updatedAt`
-- `InsertDocument<T>` omits system fields (pass only your own fields)
-- Optimistic locking: pass `{ etag: doc._etag }` to `update()`; a stale etag throws ConcurrentUpdateError. Atomic on S3; on OSS the check is emulated (HEAD then PUT) and does NOT prevent a concurrent overwrite. `delete()` takes no etag.
+- `BucketDB` — `new BucketDB(adapter, dbPath)`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
+- `Collection<T>` — typed collection, returned by `db.collection<T>(name)` (same instance per name)
+- Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no query cache.
+- Every document extends `Document`: `id` (UUID, taken from the object key), `_etag` (from storage, not stored in the body), `_createdAt`, `_updatedAt`
+- `InsertDocument<T>` and `UpdateDocument<T>` exclude `id`, `_etag`, `_createdAt`, `_updatedAt` (UpdateDocument is also Partial); system fields passed at runtime are dropped
+- Optimistic locking: `update(id, data, { etag: doc._etag })`; stale etag or lost race throws ConcurrentUpdateError (no retry). Works on Memory, S3, and FileSystem within one process. On OSS, update with etag throws UnsupportedError.
+- update without etag: on Memory / FileSystem (one process) / S3, conflicting writes are retried (up to 5 retries) so concurrent partial updates all apply; on OSS last writer wins.
 
-## Limitations (0.3.x)
+## Guarantees per backend
 
-- Single writer only: use one writer process per collection. Multiple instances/processes writing the same collection are not supported (WAL recovery in one instance can replay and clear another live instance's in-flight operations; OSS conditional writes are not atomic).
-- On OSS, issue ONE write at a time even within a single process (await each insert/update/delete before the next). Concurrent writes silently lose data: in a real-bucket test, 20 concurrent inserts into a new collection all resolved but find({}) returned only 16, and 10 concurrent updates with the same etag all succeeded.
-- On S3/FileSystem/Memory, concurrent writes within one process are detected rather than lost, but under contention a write can reject with StorageError ("PreconditionFailed") after 3 index-shard attempts. A rejected insert/update may already have written the document; its WAL entry remains and may replay it into the index when a Collection is next constructed.
-- The WAL provides no recovery guarantee: it replays index entries only, never documents. A crash mid-write can leave index and documents inconsistent (e.g. an index entry for a document that was never written, or a deleted document still returned by findById). Recovery runs in the background when a Collection is constructed and is not awaited.
-- OSS has no atomic conditional writes: OSSAdapter emulates ifMatch/ifNoneMatch with HEAD-then-PUT, so two concurrent writers (even in one process) can both pass the check. Use S3 if you need optimistic locking.
-- findById returns null for a missing document AND currently also when the storage read fails (e.g. network/permission error).
-- No scale benchmarks; no document-count capacity is claimed. Cost model: each document is `<dbPath>/<collection>/docs/<id>.json`; a sharded index (default 16 shards, `index/shard-XX.json`) holds a full copy of every document; a WAL (`wal/`) logs each write. Every write rewrites one whole index shard; every find whose filter is not an `id` equality downloads all non-empty shards. No query cache: every find reads storage.
-- Retries: S3Adapter uses the AWS SDK default retry (3 attempts; 5xx, 429, network errors). OSSAdapter uses ali-oss retryMax: 2, which retries only network errors and timeouts — 5xx and 429 are NOT retried.
+|                                      | Memory | FileSystem             | S3  | OSS                              |
+|--------------------------------------|--------|------------------------|-----|----------------------------------|
+| single write atomic                  | yes    | yes                    | yes | yes                              |
+| create-if-absent (insert)            | yes    | yes (across processes) | yes | yes (non-versioned buckets only) |
+| conditional update (etag)            | yes    | single process only    | yes | no — UnsupportedError            |
+| concurrent partial updates all apply | yes    | single process         | yes | no (last writer wins)            |
+
+Multiple writer processes are supported for insert/delete on every backend and for update on S3 (Memory/FileSystem: within one process).
+
+## Limitations (0.4.0-beta.0)
+
+- No transactions; each write touches one document.
+- Every find lists the collection and GETs every document (16 in parallel), then filters in memory; only `{ id: '...' }` reads one document. No benchmarks yet; no capacity is claimed. Intended for small collections (thousands of documents) and a few writes per second.
+- OSS: no conditional update (etag → UnsupportedError); concurrent etag-less updates are last-writer-wins.
+- FileSystem: etag checks / concurrent update merging hold only within one process.
+- 0.3.x and 0.4 clients must not write the same collection concurrently. 0.4 reads 0.3 data as-is; it reads nothing outside `docs/` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted.
+- Beta: API may change before 0.4.0.
 
 ## Package: @hold-baby/bucket-db
 
 ### Exports
 
 Classes: BucketDB, Collection, MemoryStorageAdapter, FileSystemAdapter, S3Adapter, OSSAdapter
-Errors: BucketDBError, DocumentNotFoundError, ConcurrentUpdateError, ValidationError, StorageError
-Types: Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, UpdateOptions, StorageAdapter
+Errors: BucketDBError, ValidationError, DocumentNotFoundError, ConcurrentUpdateError, UnsupportedError, StorageError
+Types: Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
 
 ### Collection API
 
 ```
-insert(data: InsertDocument<T>): Promise<T>
-findById(id: string): Promise<T | null>                    // null if not found, and currently also on storage read failure
-find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]>
-update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>
-delete(id: string): Promise<void>
+insert(data: InsertDocument<T>): Promise<T>                 // 1 conditional PUT, generated UUID id
+findById(id: string): Promise<T | null>                     // 1 GET; null ONLY if missing, other storage errors throw
+find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + GET all; results in id (key) order
+update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>   // GET + conditional PUT
+delete(id: string): Promise<void>                           // 1 DELETE; no error if missing
 ```
 
-### QueryOptions
+### QueryOptions / UpdateOptions
 
 ```
-{ limit?: number, offset?: number }
+{ limit?: number, offset?: number }   // applied after filtering
+{ etag?: string }
 ```
 
 ### Query operators
 
-$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin
+$eq, $ne, $gt, $gte, $lt, $lte, $in, $nin (fields combined with AND). Unknown operators, non-array $in/$nin, reserved field names (constructor, __proto__, …) throw ValidationError.
+
+### Adapters
+
+```
+new MemoryStorageAdapter()
+new FileSystemAdapter({ basePath })
+new S3Adapter({ bucket, region?, endpoint?, credentials?, forcePathStyle?, timeoutMs? })
+new OSSAdapter({ bucket, region?, endpoint?, credentials?, timeoutMs? })
+credentials: { accessKeyId, secretAccessKey, sessionToken?, expiresAt? } | (() => Promise<that>)   // provider re-called 5 min before expiresAt
+```
+
+S3 defaults: region AWS_REGION / AWS_DEFAULT_REGION; endpoint AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL / https://s3.<region>.amazonaws.com; credentials AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. Any S3-compatible service via endpoint; only AWS S3 and OSS are tested.
+OSS defaults: region OSS_REGION (`cn-hangzhou`; `oss-cn-hangzhou` also accepted); endpoint https://s3.oss-<region>.aliyuncs.com (S3-compatible; OSS_ENDPOINT is not read); credentials OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SESSION_TOKEN.
+Path-style addressing is automatic for IP/localhost endpoints.
+Retries (S3 and OSS): up to 3 attempts, per-attempt timeout 10 s (timeoutMs), on network errors, timeouts, 5xx, 429, SlowDown, RequestTimeout.
 
 ### Error mapping
 
-DocumentNotFoundError  — update / delete on missing doc (findById returns null instead)
-ConcurrentUpdateError  — update with stale etag, or another writer changed the doc between update's read and write (delete never throws it)
-ValidationError        — exported but not thrown by the current version
-StorageError           — underlying storage failure (incl. index shard read errors other than "not found")
+ValidationError        — invalid collection name / document ID / dbPath segment / filter; invalid adapter options; missing credentials
+DocumentNotFoundError  — update on a missing doc
+ConcurrentUpdateError  — update with stale etag, lost race with etag, or etag-less update retries exhausted
+UnsupportedError       — backend lacks the capability (OSS update with etag)
+StorageError           — storage failure; fields kind ('not-found' | 'conflict' | 'transient' | 'permanent'), key, status. Also thrown by find for a file under docs/ that is not `<id>.json` holding a JSON object (key names the file). Hidden files (starting with `.`) are ignored.
+All extend BucketDBError.
 
-Invalid collection names / document IDs: `/` and `\` become `_`, `..` is removed; then anything empty, with chars outside [a-zA-Z0-9_.-], longer than 255, or starting with `.` throws PathValidationError (not exported; extends Error, NOT BucketDBError). db.collection() throws it synchronously; for an invalid ID findById returns null and update/delete throw DocumentNotFoundError. dbPath is not validated (it is normalized with Node's path.join); FileSystemAdapter throws PathValidationError for keys containing `..`.
+Names: collection names, document IDs and each `/`-separated dbPath segment must match ^[A-Za-z0-9_.-]{1,255}$ and not start with `.`; otherwise ValidationError (never rewritten).
