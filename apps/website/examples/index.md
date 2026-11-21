@@ -7,9 +7,9 @@
 - [基础用法](./basic-usage) - 完整的 CRUD 操作示例
 - [本地存储](./local-storage) - 使用 FileSystemAdapter 进行本地开发
 
-## 生产部署
+## 云存储
 
-- [生产部署](./production) - S3 和 OSS 配置示例
+- [S3 / OSS 云存储](./production) - S3 和 OSS 配置示例
 
 ## 高级用法
 

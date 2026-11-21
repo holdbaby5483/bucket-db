@@ -186,28 +186,30 @@ for await (const page of paginateAll({ status: 'active' })) {
 
 ## 查询最佳实践
 
-### 1. 使用具体的过滤条件
+### 1. 能按 ID 查就按 ID 查
+
+只有 `id` 等值条件能缩小索引读取范围；其他任何条件（包括空过滤）都会下载所有非空索引分片，再在内存中过滤：
 
 ```typescript
-// ✅ 好：具体的条件，减少扫描
-const users = await collection.find({
-  status: 'active',
-  age: { $gte: 18 }
-});
+// ✅ 只读取一个文档
+const user = await collection.findById('user-123');
 
-// ❌ 差：空过滤，扫描所有文档
-const all = await collection.find({});
+// ✅ 只读取一个索引分片
+const users = await collection.find({ id: 'user-123' });
+
+// ⚠️ 下载整个索引（每个文档的完整副本），再在内存中过滤
+const active = await collection.find({ status: 'active' });
 ```
 
-### 2. 选择性字段优先
+### 2. 具体条件减少的是读取的文档数
 
-优先使用选择性高的字段（值分布均匀的字段）：
+过滤（并应用 `offset` / `limit`）后，BucketDB 会读取每个匹配的文档文件。更具体的条件能减少这一步读取的文档数量，但不会减少索引下载量：
 
 ```typescript
-// ✅ 好：email 唯一性高
+// 匹配的文档少，后续读取的文档文件也少
 const user = await collection.find({ email: 'alice@example.com' });
 
-// ⚠️ 差：status 值有限，选择性低
+// 匹配的文档多，后续需要读取更多文档文件
 const users = await collection.find({ status: 'active' });
 ```
 
@@ -225,7 +227,7 @@ const all = await collection.find({});
 
 ### 4. 避免过度过滤
 
-不必要的条件会降低性能：
+`id` 等值已经唯一确定文档，其他条件不会带来额外收益：
 
 ```typescript
 // ✅ 好：只用必要条件
@@ -241,10 +243,10 @@ const users = await collection.find({
 
 ## 性能提示
 
-- **分片数量** - 根据文档数量选择合适的分片数（见[核心概念](./concepts#索引分片)）
-- **批量查询** - 尽量减少查询次数，合理使用 `limit`
-- **字段选择性** - 优先使用选择性高的字段查询
-- **缓存结果** - 对频繁查询的结果进行应用层缓存
+- **按 ID 查找** - `findById` 或 `{ id: '...' }` 只读取一个文档或一个分片；其他任何过滤条件都会下载所有非空索引分片（每个文档的完整副本），与条件的选择性无关
+- **分页** - `limit` / `offset` 能减少过滤后读取的文档数量，但索引仍会被完整下载
+- **分片数量** - 分片数量影响单次写入重写的分片大小，不影响查询下载的总数据量（见[核心概念](./concepts)中的"索引分片"）
+- **缓存结果** - BucketDB 没有查询缓存，每次 `find` 都读取存储；对频繁查询的结果可在应用层缓存
 
 ## 类型安全
 

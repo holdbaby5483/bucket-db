@@ -203,11 +203,11 @@ const adapter = new FileSystemAdapter({ basePath });
 
 - ✅ 本地开发和测试
 - ✅ 桌面应用
-- ✅ 小规模服务器部署（单机）
+- ✅ 单机服务器（单个写入进程）
 - ✅ Serverless Edge Functions（读取操作）
-- ❌ 多服务器集群（需要共享存储，使用 S3/OSS）
+- ❌ 多个进程或服务器写入同一集合（任何适配器都不支持多写入者）
 
 ## 下一步
 
-- [生产部署示例](./production) - 使用 S3/OSS
+- [S3 / OSS 云存储示例](./production) - 使用 S3/OSS
 - [高级模式示例](./advanced) - 更多高级用法

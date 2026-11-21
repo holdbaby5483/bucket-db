@@ -68,7 +68,7 @@ export default defineConfig({
             { text: '示例索引', link: '/examples/' },
             { text: '基础用法', link: '/examples/basic-usage' },
             { text: '本地存储', link: '/examples/local-storage' },
-            { text: '生产部署', link: '/examples/production' },
+            { text: 'S3 / OSS 云存储', link: '/examples/production' },
             { text: '高级模式', link: '/examples/advanced' }
           ]
         }

@@ -6,7 +6,13 @@
 
 ### 基础用法
 
-使用 ETag 防止并发更新冲突：
+使用 ETag 检测 `update` 的并发冲突：
+
+::: warning 注意
+- BucketDB 没有事务：下面两次 `update` 是独立的写入，第二次失败时第一次不会回滚。
+- 在 OSS 上 `etag` 检查不是原子的，无法阻止并发覆盖；需要乐观锁请使用 S3。
+- 每个集合只能有一个写入进程。
+:::
 
 ```typescript
 import { BucketDB, FileSystemAdapter, ConcurrentUpdateError } from '@hold-baby/bucket-db';
@@ -343,6 +349,10 @@ const user2 = await cachedUsers.findById('user-123'); // 从缓存
 
 ## 批量操作模式
 
+::: warning 并发写入
+下面的示例用 `Promise.all` 并发写入一批文档。**在 OSS 上不要这样做**：即使在同一进程内，OSS 上的并发写入也会静默丢失索引条目，请把 `batchSize` 设为 `1`（逐个等待写入完成）。在 S3、FileSystem、Memory 上，并发写入会被检测到，但竞争激烈时某些写入可能以 `StorageError`（"PreconditionFailed"）失败，且失败前文档可能已写入，其 WAL 条目可能在下次构造 `Collection` 时被重放进索引。
+:::
+
 ### 批量插入
 
 ```typescript
@@ -505,5 +515,5 @@ class AuditedCollection<T extends Document> {
 ## 下一步
 
 - [基础用法](./basic-usage) - 基础 CRUD 操作
-- [生产部署](./production) - S3/OSS 配置
+- [S3 / OSS 云存储](./production) - S3/OSS 配置
 - [API 参考](/api/) - 完整 API 文档

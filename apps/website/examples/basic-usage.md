@@ -219,5 +219,5 @@ await users.update(id, updates, { etag: current._etag });
 ## 下一步
 
 - [本地存储示例](./local-storage) - 持久化存储
-- [生产部署示例](./production) - S3/OSS 配置
+- [S3 / OSS 云存储示例](./production) - S3/OSS 配置
 - [高级模式示例](./advanced) - 更多高级用法

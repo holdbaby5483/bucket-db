@@ -8,7 +8,18 @@ TypeScript document database. Uses S3 / Alibaba Cloud OSS / local filesystem as 
 - `Collection<T>` — typed collection, returned by `db.collection<T>(name)`
 - Every document extends `Document` which adds: `id` (UUID), `_etag`, `_createdAt`, `_updatedAt`
 - `InsertDocument<T>` omits system fields (pass only your own fields)
-- Optimistic locking: pass `{ etag: doc._etag }` to `update()` to prevent concurrent overwrites
+- Optimistic locking: pass `{ etag: doc._etag }` to `update()`; a stale etag throws ConcurrentUpdateError. Atomic on S3; on OSS the check is emulated (HEAD then PUT) and does NOT prevent a concurrent overwrite. `delete()` takes no etag.
+
+## Limitations (0.3.x)
+
+- Single writer only: use one writer process per collection. Multiple instances/processes writing the same collection are not supported (WAL recovery in one instance can replay and clear another live instance's in-flight operations; OSS conditional writes are not atomic).
+- On OSS, issue ONE write at a time even within a single process (await each insert/update/delete before the next). Concurrent writes silently lose data: in a real-bucket test, 20 concurrent inserts into a new collection all resolved but find({}) returned only 16, and 10 concurrent updates with the same etag all succeeded.
+- On S3/FileSystem/Memory, concurrent writes within one process are detected rather than lost, but under contention a write can reject with StorageError ("PreconditionFailed") after 3 index-shard attempts. A rejected insert/update may already have written the document; its WAL entry remains and may replay it into the index when a Collection is next constructed.
+- The WAL provides no recovery guarantee: it replays index entries only, never documents. A crash mid-write can leave index and documents inconsistent (e.g. an index entry for a document that was never written, or a deleted document still returned by findById). Recovery runs in the background when a Collection is constructed and is not awaited.
+- OSS has no atomic conditional writes: OSSAdapter emulates ifMatch/ifNoneMatch with HEAD-then-PUT, so two concurrent writers (even in one process) can both pass the check. Use S3 if you need optimistic locking.
+- findById returns null for a missing document AND currently also when the storage read fails (e.g. network/permission error).
+- No scale benchmarks; no document-count capacity is claimed. Cost model: each document is `<dbPath>/<collection>/docs/<id>.json`; a sharded index (default 16 shards, `index/shard-XX.json`) holds a full copy of every document; a WAL (`wal/`) logs each write. Every write rewrites one whole index shard; every find whose filter is not an `id` equality downloads all non-empty shards. No query cache: every find reads storage.
+- Retries: S3Adapter uses the AWS SDK default retry (3 attempts; 5xx, 429, network errors). OSSAdapter uses ali-oss retryMax: 2, which retries only network errors and timeouts — 5xx and 429 are NOT retried.
 
 ## Package: @hold-baby/bucket-db
 
@@ -22,7 +33,7 @@ Types: Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, Upda
 
 ```
 insert(data: InsertDocument<T>): Promise<T>
-findById(id: string): Promise<T | null>                    // returns null if not found
+findById(id: string): Promise<T | null>                    // null if not found, and currently also on storage read failure
 find(filter: QueryFilter<T>, options?: QueryOptions): Promise<T[]>
 update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>
 delete(id: string): Promise<void>
@@ -41,6 +52,8 @@ $eq, $ne, $gt, $gte, $lt, $lte, $in, $nin
 ### Error mapping
 
 DocumentNotFoundError  — update / delete on missing doc (findById returns null instead)
-ConcurrentUpdateError  — update / delete with stale etag
-ValidationError        — invalid input
-StorageError           — underlying I/O failure
+ConcurrentUpdateError  — update with stale etag, or another writer changed the doc between update's read and write (delete never throws it)
+ValidationError        — exported but not thrown by the current version
+StorageError           — underlying storage failure (incl. index shard read errors other than "not found")
+
+Invalid collection names / document IDs: `/` and `\` become `_`, `..` is removed; then anything empty, with chars outside [a-zA-Z0-9_.-], longer than 255, or starting with `.` throws PathValidationError (not exported; extends Error, NOT BucketDBError). db.collection() throws it synchronously; for an invalid ID findById returns null and update/delete throw DocumentNotFoundError. dbPath is not validated (it is normalized with Node's path.join); FileSystemAdapter throws PathValidationError for keys containing `..`.

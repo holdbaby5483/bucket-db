@@ -1,6 +1,16 @@
-# 生产部署示例
+# S3 / OSS 云存储示例
 
-使用 S3 和 OSS 云存储适配器进行生产环境部署。
+使用 S3 和 OSS 云存储适配器。
+
+::: warning 使用前请阅读
+- 每个集合只能有一个写入进程，不支持多个实例/进程同时写入同一集合。
+- **OSS 上一次只能有一个写入**：即使在同一进程内，OSS 上的并发写入也会静默丢失索引条目（实测并发 20 次 `insert` 全部成功返回，`find({})` 只返回 16 条）。请等待每次 `insert` / `update` / `delete` 完成后再发起下一次。
+- `OSSAdapter` 的条件写入是"先 HEAD 再 PUT"的模拟，不是原子的；在 OSS 上带 `etag` 的 `update` 无法阻止并发覆盖。需要乐观锁请使用 S3。
+- S3 上同一进程内的并发写入会被检测到，但竞争激烈时可能以 `StorageError`（"PreconditionFailed"）失败，且失败前文档可能已写入。
+- 重试：S3 使用 AWS SDK 默认重试（最多尝试 3 次，覆盖 5xx/429/网络错误）；OSS 只重试网络错误和超时，5xx 与 429 不重试。
+
+完整列表见[核心概念 - 使用限制](/guide/concepts#使用限制)。
+:::
 
 ## AWS S3 部署
 
@@ -26,7 +36,7 @@ const adapter = new S3Adapter({
 });
 
 // 创建数据库实例
-const db = new BucketDB(adapter, 'production');
+const db = new BucketDB(adapter, 'my-app');
 const users = db.collection<User>('users');
 
 // 使用方式与其他适配器相同
@@ -69,7 +79,7 @@ async function main() {
     }
   });
 
-  const db = new BucketDB(adapter, 'production');
+  const db = new BucketDB(adapter, 'my-app');
   const products = db.collection<Product>('products');
 
   // 插入产品
@@ -116,7 +126,7 @@ const adapter = new OSSAdapter({
   }
 });
 
-const db = new BucketDB(adapter, 'production');
+const db = new BucketDB(adapter, 'my-app');
 const orders = db.collection<Order>('orders');
 
 // 使用
@@ -218,11 +228,11 @@ try {
 
 ### 3. 分片配置
 
-生产环境建议增加分片数量：
+分片数量决定单次写入需要重写的索引分片大小：分片越多，每次写入重写的数据越少；但非 `id` 条件的查询仍会下载所有非空分片，总下载量不变。分片数量创建后不可修改：
 
 ```typescript
 const users = db.collection<User>('users', {
-  shardCount: 32  // 增加到 32 个分片
+  shardCount: 32
 });
 ```
 
@@ -231,13 +241,14 @@ const users = db.collection<User>('users', {
 ```typescript
 // ✅ 好：复用 adapter 和 db 实例
 const adapter = createAdapter();
-const db = new BucketDB(adapter, 'production');
+const db = new BucketDB(adapter, 'my-app');
 
 export { db };  // 导出供全局使用
 
-// ❌ 差：每次创建新实例
+// ❌ 差：每次创建新实例（每个实例的集合都会各自在后台运行 WAL 恢复，
+// 多个实例同时写入同一集合属于多写入者，不受支持）
 function getDB() {
-  return new BucketDB(createAdapter(), 'production');
+  return new BucketDB(createAdapter(), 'my-app');
 }
 ```
 
@@ -246,21 +257,22 @@ function getDB() {
 ### 1. 批量操作
 
 ```typescript
-// 批量插入
+// 批量插入：逐个等待写入完成。
+// OSS 上并发写入会静默丢失索引条目；S3 上并发写入在竞争时可能以 StorageError 失败
 const users = [
   { name: 'Alice', email: 'alice@example.com' },
   { name: 'Bob', email: 'bob@example.com' },
 ];
 
-await Promise.all(
-  users.map(user => collection.insert(user))
-);
+for (const user of users) {
+  await collection.insert(user);
+}
 ```
 
 ### 2. 并行查询
 
 ```typescript
-// 并行查询多个分片
+// 并行执行多个查询（每个非 id 查询都会下载整个索引）
 const [activeUsers, inactiveUsers] = await Promise.all([
   users.find({ status: 'active' }),
   users.find({ status: 'inactive' })
