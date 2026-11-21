@@ -7,7 +7,7 @@ import type { StorageAdapter } from '../../src/index.js';
 
 export type WorkerBackend =
   | { kind: 'fs'; basePath: string }
-  | { kind: 'fake-s3'; endpoint: string; bucket: string }
+  | { kind: 's3-endpoint'; endpoint: string; bucket: string; accessKeyId: string; secretAccessKey: string }
   | { kind: 'oss' }
   | { kind: 's3' };
 
@@ -22,12 +22,12 @@ export function adapterFor(backend: WorkerBackend): StorageAdapter {
   switch (backend.kind) {
     case 'fs':
       return new FileSystemAdapter({ basePath: backend.basePath });
-    case 'fake-s3':
+    case 's3-endpoint':
       return new S3Adapter({
         bucket: backend.bucket,
         region: 'us-east-1',
         endpoint: backend.endpoint,
-        credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+        credentials: { accessKeyId: backend.accessKeyId, secretAccessKey: backend.secretAccessKey },
       });
     case 'oss':
       return new OSSAdapter({ bucket: process.env.OSS_BUCKET! });

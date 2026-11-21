@@ -48,6 +48,7 @@ async function insertFromProcesses(backend: WorkerBackend) {
 
 const withOss = process.env.OSS_ACCESS_KEY_ID ? test : test.skip;
 const withS3 = process.env.AWS_ACCESS_KEY_ID && process.env.TEST_S3_BUCKET ? test : test.skip;
+const withLocalS3 = process.env.LOCAL_S3_ENDPOINT && process.env.LOCAL_S3_BUCKET ? test : test.skip;
 
 describe('multiple processes inserting into one collection', () => {
   const basePath = mkdtempSync(join(tmpdir(), 'bucketdb-multiprocess-'));
@@ -58,11 +59,20 @@ describe('multiple processes inserting into one collection', () => {
   test('fake S3', async () => {
     const s3 = startFakeS3();
     try {
-      await insertFromProcesses({ kind: 'fake-s3', endpoint: s3.url, bucket: s3.bucket });
+      await insertFromProcesses({ kind: 's3-endpoint', endpoint: s3.url, bucket: s3.bucket, accessKeyId: 'test', secretAccessKey: 'test' });
     } finally {
       s3.stop();
     }
   }, 60_000);
+
+  withLocalS3('local S3', () =>
+    insertFromProcesses({
+      kind: 's3-endpoint',
+      endpoint: process.env.LOCAL_S3_ENDPOINT!,
+      bucket: process.env.LOCAL_S3_BUCKET!,
+      accessKeyId: process.env.LOCAL_S3_ACCESS_KEY_ID ?? 'test',
+      secretAccessKey: process.env.LOCAL_S3_SECRET_ACCESS_KEY ?? 'test',
+    }), 120_000);
 
   withOss('real OSS', () => insertFromProcesses({ kind: 'oss' }), 120_000);
   withS3('real S3', () => insertFromProcesses({ kind: 's3' }), 120_000);

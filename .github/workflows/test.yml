@@ -71,6 +71,44 @@ jobs:
       - name: Run the built package on Node
         run: node packages/core/scripts/node-smoke.mjs
 
+  local-s3:
+    name: Conformance on a local S3 (SeaweedFS)
+    runs-on: ubuntu-latest
+    env:
+      SEAWEEDFS_VERSION: '4.54'
+      LOCAL_S3_ENDPOINT: http://127.0.0.1:8333
+      LOCAL_S3_BUCKET: bucketdb-ci
+      LOCAL_S3_ACCESS_KEY_ID: test
+      LOCAL_S3_SECRET_ACCESS_KEY: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Start SeaweedFS
+        run: |
+          curl -sSL "https://github.com/seaweedfs/seaweedfs/releases/download/${SEAWEEDFS_VERSION}/linux_amd64.tar.gz" | tar xz -C "$RUNNER_TEMP"
+          echo '{"identities":[{"name":"ci","credentials":[{"accessKey":"test","secretKey":"test"}],"actions":["Admin","Read","Write","List","Tagging"]}]}' > "$RUNNER_TEMP/s3.json"
+          mkdir -p "$RUNNER_TEMP/data"
+          "$RUNNER_TEMP/weed" server -dir="$RUNNER_TEMP/data" -ip=127.0.0.1 -s3 -s3.port=8333 -s3.config="$RUNNER_TEMP/s3.json" > "$RUNNER_TEMP/weed.log" 2>&1 &
+          for attempt in $(seq 60); do
+            if curl -sf --aws-sigv4 'aws:amz:us-east-1:s3' --user test:test -X PUT "$LOCAL_S3_ENDPOINT/$LOCAL_S3_BUCKET" -o /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/weed.log"
+          exit 1
+
+      - name: Run conformance and multi-process tests
+        run: bun test packages/core/tests/conformance/local-s3.test.ts packages/core/tests/core/multiprocess.test.ts
+
   integration-test:
     name: Conformance on real OSS
     runs-on: ubuntu-latest
