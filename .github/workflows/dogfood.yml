@@ -1,0 +1,90 @@
+name: Dogfood
+
+# This repository's own use of BucketDB: every push to main records benchmark
+# results per commit and runtime into a collection on OSS, through the built
+# CLI, and checks that every job's record is readable by the others.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: 1.4.2
+  OSS_REGION: ${{ secrets.OSS_REGION }}
+  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+  BUCKET_DB_URL: oss://${{ secrets.OSS_BUCKET }}/ci/bucket-db
+
+jobs:
+  record:
+    name: Record benchmarks (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runtime: bun
+            cli: bun packages/core/dist/cli.js
+            node: 22
+          - runtime: node20
+            cli: node packages/core/dist/cli.js
+            node: 20
+          - runtime: node22
+            cli: node packages/core/dist/cli.js
+            node: 22
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install and build
+        run: bun install && bun run --cwd packages/core build
+
+      - name: Benchmark the filesystem backend
+        run: bun packages/core/bench/run.ts fs 100,1000 --json > bench.json
+
+      - name: Record the result
+        run: |
+          jq -c --arg sha "$GITHUB_SHA" --arg runtime "${{ matrix.runtime }}" --arg run "$GITHUB_RUN_ID" \
+            '{sha: $sha, runtime: $runtime, run: $run, results: .}' bench.json \
+            | ${{ matrix.cli }} put benchmarks "$GITHUB_SHA-${{ matrix.runtime }}"
+
+      - name: Read it back
+        run: |
+          ${{ matrix.cli }} get benchmarks "$GITHUB_SHA-${{ matrix.runtime }}" | jq -e --arg sha "$GITHUB_SHA" '.sha == $sha'
+          echo "Records for this commit so far:"
+          ${{ matrix.cli }} find benchmarks "{\"sha\":\"$GITHUB_SHA\"}" | jq -r '.[].runtime'
+
+  verify:
+    name: Every job's record is visible
+    needs: record
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install and build
+        run: bun install && bun run --cwd packages/core build
+
+      - name: Check the records
+        run: |
+          count=$(node packages/core/dist/cli.js count benchmarks "{\"sha\":\"$GITHUB_SHA\"}")
+          echo "records for $GITHUB_SHA: $count"
+          test "$count" -eq 3
+
+      - name: Recent history
+        run: |
+          node packages/core/dist/cli.js find benchmarks '{"runtime":"node22"}' --sort _createdAt:desc --limit 10 \
+            | jq -r '.[] | [.sha[0:7], (.results[] | select(.documents == 1000 and .operation == "find, current snapshot") | .ms)] | @tsv'

@@ -1,11 +1,12 @@
 /**
  * Request counts and latency per operation at 100, 1,000 and 10,000 documents.
  *
- *   bun packages/core/bench/run.ts <fs|s3|oss> [sizes]
+ *   bun packages/core/bench/run.ts <fs|s3|oss> [sizes] [--json]
  *
  * s3 / oss use the buckets from the environment (TEST_S3_BUCKET, OSS_BUCKET and
  * the usual AWS_* / OSS_* variables), write only under test/bench-<time>/ and
- * delete everything afterwards. Prints a Markdown table.
+ * delete everything afterwards. Prints a Markdown table, or with --json one
+ * JSON array of { documents, operation, requests, ms, note }.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -48,8 +49,9 @@ class Counting implements StorageAdapter {
   }
 }
 
-const backend = process.argv[2];
-const sizes = (process.argv[3] ?? '100,1000,10000').split(',').map(Number);
+const json = process.argv.includes('--json');
+const [backend, sizeList = '100,1000,10000'] = process.argv.slice(2).filter(arg => arg !== '--json');
+const sizes = sizeList.split(',').map(Number);
 let cleanupDir: string | undefined;
 const inner: StorageAdapter =
   backend === 'fs'
@@ -82,9 +84,9 @@ const document = (n: number) => ({
   note: 'x'.repeat(300), // ~450 bytes per document
 });
 
-const rows: string[] = [];
-const row = (n: number, operation: string, result: { ms: number; requests: number }, extra = '') =>
-  rows.push(`| ${n} | ${operation} | ${Number(result.requests.toFixed(1))} | ${result.ms.toFixed(0)} | ${extra} |`);
+const rows: Array<{ documents: number; operation: string; requests: number; ms: number; note: string }> = [];
+const row = (documents: number, operation: string, result: { ms: number; requests: number }, note = '') =>
+  rows.push({ documents, operation, requests: Number(result.requests.toFixed(1)), ms: Math.round(result.ms), note });
 
 const dbRoot = `test/bench-${Date.now()}`;
 try {
@@ -126,4 +128,10 @@ try {
   }
 }
 
-console.log(`| documents | operation | requests | ms | note |\n|---:|---|---:|---:|---|\n${rows.join('\n')}`);
+console.log(
+  json
+    ? JSON.stringify(rows)
+    : `| documents | operation | requests | ms | note |\n|---:|---|---:|---:|---|\n${rows
+        .map(({ documents, operation, requests, ms, note }) => `| ${documents} | ${operation} | ${requests} | ${ms} | ${note} |`)
+        .join('\n')}`
+);

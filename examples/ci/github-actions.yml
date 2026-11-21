@@ -1,0 +1,59 @@
+# Keep Jest test durations across CI runs in an S3 bucket, with no stored secrets.
+#
+# One-time setup (see README.md in this directory):
+#   - an IAM role trusted by GitHub's OIDC provider (github-oidc-trust-policy.json)
+#     with the permissions in aws-iam-policy.json
+#   - optional: s3-lifecycle.json to expire old records
+name: Tests
+
+on: [push, pull_request]
+
+permissions:
+  id-token: write # lets the job request an OIDC token for the role below
+  contents: read
+
+env:
+  BUCKET_DB_URL: s3://my-ci-bucket/ci-data?region=us-east-1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Exports AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN,
+      # which BucketDB reads; the credentials expire with the job.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/ci-bucket-db
+          aws-region: us-east-1
+
+      - name: Show the slowest tests of the last 10 runs of this shard
+        run: |
+          npx -y @hold-baby/bucket-db find test-durations "{\"shard\":${{ matrix.shard }}}" --sort _createdAt:desc --limit 10 \
+            | jq -r '[.[].tests[]] | group_by(.name) | map({name: .[0].name, avg: (map(.ms) | add / length)}) | sort_by(-.avg) | .[:5][] | "\(.avg | floor) ms  \(.name)"'
+
+      - name: Run tests
+        run: npx jest --shard=${{ matrix.shard }}/3 --json --outputFile=results.json
+
+      # Keyed by run and shard, so a re-run overwrites instead of duplicating.
+      - name: Record durations
+        if: always()
+        run: |
+          jq -c --arg sha "$GITHUB_SHA" --argjson shard ${{ matrix.shard }} \
+            '{sha: $sha, shard: $shard, tests: [.testResults[].assertionResults[] | {name: .fullName, ms: .duration}]}' results.json \
+            | npx -y @hold-baby/bucket-db put test-durations "$GITHUB_RUN_ID-${{ matrix.shard }}"
+
+  # Alibaba Cloud OSS variant of the credentials step:
+  #   - uses: aliyun/configure-aliyun-credentials-action@v1
+  #     with:
+  #       role-to-assume: acs:ram::123456789012:role/ci-bucket-db
+  #       oidc-provider-arn: acs:ram::123456789012:oidc-provider/github
+  #   with BUCKET_DB_URL: oss://my-ci-bucket/ci-data?region=cn-hangzhou
+  #   (BucketDB reads the ALIBABA_CLOUD_* variables that action exports.)

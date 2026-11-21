@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-test-durations-after-90-days",
+      "Filter": { "Prefix": "ci-data/test-durations/docs/" },
+      "Status": "Enabled",
+      "Expiration": { "Days": 90 }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+# Keep Jest test durations across pipelines in an S3 bucket using GitLab's OIDC
+# token; no access keys are stored in CI/CD variables.
+#
+# One-time setup: an IAM role trusting gitlab.com as an OIDC provider
+# (README.md) with the permissions in aws-iam-policy.json.
+variables:
+  BUCKET_DB_URL: s3://my-ci-bucket/ci-data?region=us-east-1
+  ROLE_ARN: arn:aws:iam::123456789012:role/ci-bucket-db
+
+test:
+  image: node:22
+  id_tokens:
+    AWS_ID_TOKEN:
+      aud: sts.amazonaws.com
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq awscli jq > /dev/null
+    # Exchange the job's OIDC token for temporary credentials BucketDB reads from the environment.
+    - >
+      creds=$(aws sts assume-role-with-web-identity --role-arn "$ROLE_ARN"
+      --role-session-name "gitlab-$CI_JOB_ID" --web-identity-token "$AWS_ID_TOKEN"
+      --duration-seconds 3600 --query Credentials --output json)
+    - export AWS_ACCESS_KEY_ID=$(echo "$creds" | jq -r .AccessKeyId)
+    - export AWS_SECRET_ACCESS_KEY=$(echo "$creds" | jq -r .SecretAccessKey)
+    - export AWS_SESSION_TOKEN=$(echo "$creds" | jq -r .SessionToken)
+  script:
+    - npx -y @hold-baby/bucket-db find test-durations --sort _createdAt:desc --limit 10 | jq -r '.[] | "\(.sha[0:8]) \(.totalMs) ms"'
+    # Keep the test result, record durations either way, then fail the job if the tests failed.
+    - npx jest --json --outputFile=results.json && status=0 || status=$?
+    - >
+      jq -c --arg sha "$CI_COMMIT_SHA" '{sha: $sha, totalMs: ([.testResults[].assertionResults[].duration] | add),
+      tests: [.testResults[].assertionResults[] | {name: .fullName, ms: .duration}]}' results.json
+      | npx -y @hold-baby/bucket-db put test-durations "$CI_PIPELINE_ID-$CI_JOB_ID"
+    - exit $status
