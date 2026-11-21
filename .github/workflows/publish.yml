@@ -33,6 +33,9 @@ jobs:
         run: |
           cd packages/core && bun run build
 
+      - name: Run tests
+        run: bun test
+
       - name: Extract version from tag
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
@@ -42,17 +45,6 @@ jobs:
           VERSION=${{ steps.version.outputs.VERSION }}
           cd packages/core
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
-
-      - name: Verify npm token
-        run: |
-          if [ -z "${{ secrets.NPM_TOKEN }}" ]; then
-            echo "❌ NPM_TOKEN is empty"
-            exit 1
-          fi
-          echo "✅ NPM_TOKEN is set (length: ${#NODE_AUTH_TOKEN})"
-          echo "Token prefix: ${NODE_AUTH_TOKEN:0:4}..."
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Publish @hold-baby/bucket-db
         working-directory: packages/core
