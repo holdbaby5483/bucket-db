@@ -37,7 +37,9 @@ export function openUrl(url = process.env.BUCKET_DB_URL): { adapter: StorageAdap
     throw new ValidationError('Invalid connection URL');
   }
   if (parsed.username || parsed.password) {
-    throw new ValidationError('Connection URLs must not contain credentials; use environment variables or the credentials option');
+    throw new ValidationError(
+      'Connection URLs must not contain credentials; use environment variables or the credentials option'
+    );
   }
   const scheme = parsed.protocol.slice(0, -1);
   const allowed = PARAMETERS[scheme];
@@ -45,7 +47,9 @@ export function openUrl(url = process.env.BUCKET_DB_URL): { adapter: StorageAdap
   const params: Record<string, string> = {};
   for (const [name, value] of parsed.searchParams) {
     if (!allowed.includes(name)) {
-      throw new ValidationError(`Unknown parameter "${name}" for ${scheme}://; allowed: ${allowed.join(', ') || 'none'}`);
+      throw new ValidationError(
+        `Unknown parameter "${name}" for ${scheme}://; allowed: ${allowed.join(', ') || 'none'}`
+      );
     }
     params[name] = value;
   }
@@ -59,7 +63,10 @@ export function openUrl(url = process.env.BUCKET_DB_URL): { adapter: StorageAdap
   const options = { bucket: parsed.hostname, region: params.region, endpoint: params.endpoint, timeoutMs };
   const adapter =
     scheme === 's3'
-      ? new S3Adapter({ ...options, forcePathStyle: params.forcePathStyle === undefined ? undefined : params.forcePathStyle === 'true' })
+      ? new S3Adapter({
+          ...options,
+          forcePathStyle: params.forcePathStyle === undefined ? undefined : params.forcePathStyle === 'true',
+        })
       : new OSSAdapter(options);
   return { adapter, dbPath: path };
 }

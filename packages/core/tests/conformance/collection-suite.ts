@@ -137,7 +137,9 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       const next = random(42);
       const letters = ['a', 'b', 'c', 'd', 'e'];
       const docs = await Promise.all(
-        Array.from({ length: 30 }, () => items.insert({ n: Math.floor(next() * 10), s: letters[Math.floor(next() * 5)] }))
+        Array.from({ length: 30 }, () =>
+          items.insert({ n: Math.floor(next() * 10), s: letters[Math.floor(next() * 5)] })
+        )
       );
 
       for (let round = 0; round < 20; round++) {
@@ -154,7 +156,12 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
         ];
         const [filter, predicate] = cases[round % cases.length];
         const found = (await items.find(filter)).map(doc => doc.id).sort();
-        expect(found).toEqual(docs.filter(predicate).map(doc => doc.id).sort());
+        expect(found).toEqual(
+          docs
+            .filter(predicate)
+            .map(doc => doc.id)
+            .sort()
+        );
       }
 
       // the filter sees the current version, not an older copy
@@ -178,13 +185,21 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       };
       const found = await new BucketDB(storage, dbPath).collection<Item>('d5').find({});
       const removedId = docs.find(doc => removed!.endsWith(`/${doc.id}.json`))!.id;
-      expect(found.map(doc => doc.id).sort()).toEqual(docs.map(doc => doc.id).filter(id => id !== removedId).sort());
+      expect(found.map(doc => doc.id).sort()).toEqual(
+        docs
+          .map(doc => doc.id)
+          .filter(id => id !== removedId)
+          .sort()
+      );
     });
 
     test('D6 a document file that is not a JSON object is an error naming the key', async () => {
       const items = db.collection<Item>('d6');
       await items.insert({ n: 1, s: 'a' });
-      for (const [id, body] of [['bad-json', 'not json'], ['bad-array', '[1,2]']]) {
+      for (const [id, body] of [
+        ['bad-json', 'not json'],
+        ['bad-array', '[1,2]'],
+      ]) {
         const key = `${dbPath}/d6/docs/${id}.json`;
         await adapter.put(key, bytes(body));
         const fromFind = await rejection(items.find({}));
@@ -206,7 +221,9 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       expect(await items.find({ s: 'm' })).toEqual([doc!]);
 
       const inserted = await items.insert({ n: 8, s: 'x' });
-      const stored = JSON.parse(new TextDecoder().decode((await adapter.get(`${dbPath}/d7/docs/${inserted.id}.json`)).body));
+      const stored = JSON.parse(
+        new TextDecoder().decode((await adapter.get(`${dbPath}/d7/docs/${inserted.id}.json`)).body)
+      );
       expect(stored).not.toHaveProperty('_etag');
       expect(stored).toMatchObject({ n: 8, s: 'x' });
     });
@@ -220,7 +237,9 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       if (compareAndSwap) {
         await items.update(doc.id, { n: 2 });
         calls.length = 0;
-        expect(await rejection(items.update(doc.id, { n: 3 }, { etag: doc._etag }))).toBeInstanceOf(ConcurrentUpdateError);
+        expect(await rejection(items.update(doc.id, { n: 3 }, { etag: doc._etag }))).toBeInstanceOf(
+          ConcurrentUpdateError
+        );
         expect(calls).not.toContain('put');
         expect((await items.findById(doc.id))!.n).toBe(2);
       } else {
@@ -272,7 +291,9 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
         expect(await rejection(items.delete(id))).toBeInstanceOf(ValidationError);
       }
       expect(await rejection(items.find({ constructor: 1 } as QueryFilter<Item>))).toBeInstanceOf(ValidationError);
-      expect(await rejection(items.find({ n: { $bad: 1 } } as unknown as QueryFilter<Item>))).toBeInstanceOf(ValidationError);
+      expect(await rejection(items.find({ n: { $bad: 1 } } as unknown as QueryFilter<Item>))).toBeInstanceOf(
+        ValidationError
+      );
       expect(calls).toEqual([]);
     });
 
@@ -334,13 +355,29 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
     test('D13 a collection written by 0.3.x is readable; index/ and wal/ are ignored', async () => {
       const base = `${dbPath}/legacy`;
       const legacy = [
-        { id: 'a1b2c3d4-0000-4000-8000-000000000001', n: 1, s: 'x', _etag: 'old', _createdAt: '2026-03-01T00:00:00.000Z', _updatedAt: '2026-03-01T00:00:00.000Z' },
-        { id: 'a1b2c3d4-0000-4000-8000-000000000002', n: 2, s: 'y', _createdAt: '2026-03-02T00:00:00.000Z', _updatedAt: '2026-03-02T00:00:00.000Z' },
+        {
+          id: 'a1b2c3d4-0000-4000-8000-000000000001',
+          n: 1,
+          s: 'x',
+          _etag: 'old',
+          _createdAt: '2026-03-01T00:00:00.000Z',
+          _updatedAt: '2026-03-01T00:00:00.000Z',
+        },
+        {
+          id: 'a1b2c3d4-0000-4000-8000-000000000002',
+          n: 2,
+          s: 'y',
+          _createdAt: '2026-03-02T00:00:00.000Z',
+          _updatedAt: '2026-03-02T00:00:00.000Z',
+        },
       ];
       for (const doc of legacy) {
         await adapter.put(`${base}/docs/${doc.id}.json`, bytes(JSON.stringify(doc, null, 2)));
       }
-      await adapter.put(`${base}/index/shard-03.json`, bytes(JSON.stringify({ shardId: '03', documents: { ghost: { id: 'ghost' } } })));
+      await adapter.put(
+        `${base}/index/shard-03.json`,
+        bytes(JSON.stringify({ shardId: '03', documents: { ghost: { id: 'ghost' } } }))
+      );
       await adapter.put(`${base}/index/shard-03.meta.json`, bytes('{"shardId":"03","docCount":1}'));
       await adapter.put(`${base}/wal/ghost.wal.json`, bytes('{"operation":"insert","documentId":"ghost"}'));
 

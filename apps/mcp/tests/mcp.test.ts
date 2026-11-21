@@ -16,15 +16,22 @@ interface ToolResult {
 }
 
 function startServer(env: Record<string, string>) {
-  const child = Bun.spawn(['bun', serverPath], { env: { ...process.env, ...env }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
-  const pending = new Map<number, (message: { result?: { isError?: boolean; content: Array<{ text: string }> } }) => void>();
+  const child = Bun.spawn(['bun', serverPath], {
+    env: { ...process.env, ...env },
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const pending = new Map<
+    number,
+    (message: { result?: { isError?: boolean; content: Array<{ text: string }> } }) => void
+  >();
   let nextId = 0;
   (async () => {
     let buffer = '';
     for await (const chunk of child.stdout) {
       buffer += new TextDecoder().decode(chunk);
-      let newline;
-      while ((newline = buffer.indexOf('\n')) >= 0) {
+      for (let newline = buffer.indexOf('\n'); newline >= 0; newline = buffer.indexOf('\n')) {
         const message = JSON.parse(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         pending.get(message.id)?.(message);
@@ -41,7 +48,11 @@ function startServer(env: Record<string, string>) {
   return {
     child,
     async initialize() {
-      await request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '0' } });
+      await request('initialize', {
+        protocolVersion: '2025-03-26',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '0' },
+      });
       send({ method: 'notifications/initialized' });
     },
     async tool(name: string, args: object): Promise<ToolResult> {
@@ -66,20 +77,32 @@ describe('MCP server', () => {
   });
 
   test('insert, put, find, count, update and delete through tools', async () => {
-    const inserted = JSON.parse((await server.tool('db_insert', { collection: 'notes', data: { title: 'a', n: 2 } })).text);
+    const inserted = JSON.parse(
+      (await server.tool('db_insert', { collection: 'notes', data: { title: 'a', n: 2 } })).text
+    );
     await server.tool('db_put', { collection: 'notes', id: 'fixed', data: { title: 'b', n: 1 } });
 
     const sorted = JSON.parse((await server.tool('db_find', { collection: 'notes', filter: {}, sort: { n: 1 } })).text);
     expect(sorted.map((doc: { id: string }) => doc.id)).toEqual(['fixed', inserted.id]);
     expect((await server.tool('db_count', { collection: 'notes', filter: { n: { $gt: 1 } } })).text).toBe('1');
 
-    const conflict = await server.tool('db_update', { collection: 'notes', id: 'fixed', data: { n: 5 }, etag: 'stale' });
+    const conflict = await server.tool('db_update', {
+      collection: 'notes',
+      id: 'fixed',
+      data: { n: 5 },
+      etag: 'stale',
+    });
     expect(conflict).toEqual({ isError: true, text: 'Concurrent update conflict for: fixed' });
-    expect(JSON.parse((await server.tool('db_update', { collection: 'notes', id: 'fixed', data: { n: 5 } })).text).n).toBe(5);
+    expect(
+      JSON.parse((await server.tool('db_update', { collection: 'notes', id: 'fixed', data: { n: 5 } })).text).n
+    ).toBe(5);
 
     expect((await server.tool('db_delete', { collection: 'notes', id: 'fixed' })).isError).toBe(false);
     expect((await server.tool('db_delete', { collection: 'notes', id: 'fixed' })).isError).toBe(false);
-    expect(await server.tool('db_find_by_id', { collection: 'notes', id: 'fixed' })).toEqual({ isError: true, text: 'Document not found: fixed' });
+    expect(await server.tool('db_find_by_id', { collection: 'notes', id: 'fixed' })).toEqual({
+      isError: true,
+      text: 'Document not found: fixed',
+    });
   });
 
   test('insert with a taken id and invalid names are reported as tool errors', async () => {
@@ -91,7 +114,12 @@ describe('MCP server', () => {
   });
 
   test('without BUCKET_DB_URL the server exits with a message', async () => {
-    const child = Bun.spawn(['bun', serverPath], { env: { ...process.env, BUCKET_DB_URL: '' }, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+    const child = Bun.spawn(['bun', serverPath], {
+      env: { ...process.env, BUCKET_DB_URL: '' },
+      stdin: 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     expect(await child.exited).toBe(1);
     expect(await new Response(child.stderr).text()).toContain('BUCKET_DB_URL');
   });

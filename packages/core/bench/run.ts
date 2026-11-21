@@ -52,10 +52,10 @@ class Counting implements StorageAdapter {
 const json = process.argv.includes('--json');
 const [backend, sizeList = '100,1000,10000'] = process.argv.slice(2).filter(arg => arg !== '--json');
 const sizes = sizeList.split(',').map(Number);
-let cleanupDir: string | undefined;
+const cleanupDir = backend === 'fs' ? mkdtempSync(join(tmpdir(), 'bucketdb-bench-')) : undefined;
 const inner: StorageAdapter =
-  backend === 'fs'
-    ? new FileSystemAdapter({ basePath: (cleanupDir = mkdtempSync(join(tmpdir(), 'bucketdb-bench-'))) })
+  cleanupDir !== undefined
+    ? new FileSystemAdapter({ basePath: cleanupDir })
     : backend === 's3'
       ? new S3Adapter({ bucket: process.env.TEST_S3_BUCKET! })
       : backend === 'oss'
@@ -74,7 +74,8 @@ async function measure(times: number, fn: (index: number) => Promise<unknown>) {
 }
 
 async function inBatches<T>(values: T[], size: number, fn: (value: T) => Promise<unknown>) {
-  for (let start = 0; start < values.length; start += size) await Promise.all(values.slice(start, start + size).map(fn));
+  for (let start = 0; start < values.length; start += size)
+    await Promise.all(values.slice(start, start + size).map(fn));
 }
 
 const document = (n: number) => ({
@@ -96,7 +97,11 @@ try {
     const snapshotKey = `${dbPath}/items/_snapshot.v1.json`;
 
     const seeded: Item[] = [];
-    await inBatches(Array.from({ length: n }, (_, i) => i), 64, async i => seeded.push(await items.insert(document(i))));
+    await inBatches(
+      Array.from({ length: n }, (_, i) => i),
+      64,
+      async i => seeded.push(await items.insert(document(i)))
+    );
 
     row(n, 'insert', await measure(5, i => items.insert(document(n + i))));
     row(n, 'findById', await measure(5, i => items.findById(seeded[i].id)));
@@ -113,7 +118,12 @@ try {
 
     const compact = await measure(1, () => items.compact());
     const snapshotBytes = backend === 'fs' ? 0 : (await inner.get(snapshotKey)).body.length;
-    row(n, 'compact', compact, backend === 'fs' ? 'no snapshot on local backends' : `snapshot ${(snapshotBytes / 1024).toFixed(0)} kB`);
+    row(
+      n,
+      'compact',
+      compact,
+      backend === 'fs' ? 'no snapshot on local backends' : `snapshot ${(snapshotBytes / 1024).toFixed(0)} kB`
+    );
     console.error(`n=${n} done`);
   }
 } finally {
@@ -132,6 +142,9 @@ console.log(
   json
     ? JSON.stringify(rows)
     : `| documents | operation | requests | ms | note |\n|---:|---|---:|---:|---|\n${rows
-        .map(({ documents, operation, requests, ms, note }) => `| ${documents} | ${operation} | ${requests} | ${ms} | ${note} |`)
+        .map(
+          ({ documents, operation, requests, ms, note }) =>
+            `| ${documents} | ${operation} | ${requests} | ${ms} | ${note} |`
+        )
         .join('\n')}`
 );

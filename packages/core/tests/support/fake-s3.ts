@@ -146,7 +146,9 @@ export function startFakeS3(bucket = 'fake-bucket', options: FakeS3Options = {})
       case 'GET':
         return existing ? new Response(existing.body, { headers: objectHeaders(existing) }) : errorResponse(404);
       case 'HEAD':
-        return existing ? new Response(null, { headers: objectHeaders(existing) }) : new Response(null, { status: 404 });
+        return existing
+          ? new Response(null, { headers: objectHeaders(existing) })
+          : new Response(null, { status: 404 });
       case 'PUT': {
         const ifMatch = request.headers.get('if-match');
         const ifNoneMatch = request.headers.get('if-none-match');
@@ -155,7 +157,8 @@ export function startFakeS3(bucket = 'fake-bucket', options: FakeS3Options = {})
           return errorResponse(409, 'FileAlreadyExists');
         }
         if (ifMatch !== null && !existing) return errorResponse(404);
-        if (ifMatch !== null && ifMatch.replace(/"/g, '') !== existing!.etag.replace(/"/g, '')) return errorResponse(412);
+        if (ifMatch !== null && ifMatch.replace(/"/g, '') !== existing!.etag.replace(/"/g, ''))
+          return errorResponse(412);
         if (ifNoneMatch === '*' && existing) return errorResponse(412);
         const stored = store(new Uint8Array(await request.arrayBuffer()));
         objects.set(key, stored);

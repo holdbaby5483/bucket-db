@@ -29,7 +29,8 @@ describe('query snapshot', () => {
   let events: LogEvent[];
   let items: Collection<Item>;
 
-  const truth = async () => new BucketDB(new LocalView(inner), 'db', { logger: () => {} }).collection<Item>('items').find({});
+  const truth = async () =>
+    new BucketDB(new LocalView(inner), 'db', { logger: () => {} }).collection<Item>('items').find({});
   const ids = (docs: Item[]) => docs.map(doc => doc.id);
 
   beforeEach(async () => {
@@ -62,7 +63,8 @@ describe('query snapshot', () => {
   test('the snapshot is rewritten only when more than 16 documents changed', async () => {
     const docs = await items.find({});
     const snapshotWrites = () => calls.filter(([operation, key]) => operation === 'put' && key === SNAPSHOT).length;
-    const documentReads = () => calls.filter(([operation, key]) => operation === 'get' && key.includes('/docs/')).length;
+    const documentReads = () =>
+      calls.filter(([operation, key]) => operation === 'get' && key.includes('/docs/')).length;
 
     await Promise.all(docs.slice(0, 16).map(doc => items.update(doc.id, { n: -1 })));
     for (let query = 0; query < 2; query++) {
@@ -95,8 +97,14 @@ describe('query snapshot', () => {
   test.each([
     ['deleted', async () => inner.delete(SNAPSHOT)],
     ['not JSON', async () => void (await inner.put(SNAPSHOT, bytes('{{{')))],
-    ['the wrong shape', async () => void (await inner.put(SNAPSHOT, bytes('{"format":"bucket-db-snapshot","version":1,"documents":[]}')))],
-    ['a future version', async () => void (await inner.put(SNAPSHOT, bytes('{"format":"bucket-db-snapshot","version":2,"documents":{}}')))],
+    [
+      'the wrong shape',
+      async () => void (await inner.put(SNAPSHOT, bytes('{"format":"bucket-db-snapshot","version":1,"documents":[]}'))),
+    ],
+    [
+      'a future version',
+      async () => void (await inner.put(SNAPSHOT, bytes('{"format":"bucket-db-snapshot","version":2,"documents":{}}'))),
+    ],
   ])('a snapshot that is %s gives the same result', async (_, damage) => {
     await items.find({});
     await damage();
@@ -183,7 +191,9 @@ describe('envelope warning', () => {
     const events: LogEvent[] = [];
     const items = new BucketDB(adapter, 'db', { logger: event => events.push(event) }).collection<Item>('items');
     for (let start = 0; start < count; start += 1000) {
-      await Promise.all(Array.from({ length: Math.min(1000, count - start) }, (_, n) => items.insert({ n: start + n })));
+      await Promise.all(
+        Array.from({ length: Math.min(1000, count - start) }, (_, n) => items.insert({ n: start + n }))
+      );
     }
     return { items, events };
   }
@@ -191,13 +201,17 @@ describe('envelope warning', () => {
   test.each([
     ['remote', () => new RemoteMemory()],
     ['local', () => new MemoryStorageAdapter()],
-  ])('a %s collection over 10,000 documents warns once', async (_, make) => {
-    const { items, events } = await fill(make(), 10_001);
-    await items.find({});
-    await items.find({});
-    expect(events.filter(event => event.level === 'warn')).toHaveLength(1);
-    expect(events[0].message).toContain('10001 documents');
-  }, 60_000);
+  ])(
+    'a %s collection over 10,000 documents warns once',
+    async (_, make) => {
+      const { items, events } = await fill(make(), 10_001);
+      await items.find({});
+      await items.find({});
+      expect(events.filter(event => event.level === 'warn')).toHaveLength(1);
+      expect(events[0].message).toContain('10001 documents');
+    },
+    60_000
+  );
 
   test('a collection inside the envelope does not warn', async () => {
     const { items, events } = await fill(new RemoteMemory(), 100);

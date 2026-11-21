@@ -38,7 +38,13 @@ export function adapterFor(backend: WorkerBackend): StorageAdapter {
 
 if (import.meta.main) {
   const config = JSON.parse(process.env.BUCKETDB_WORKER!) as WorkerConfig;
-  const items = new BucketDB(adapterFor(config.backend), config.dbPath).collection<{ id: string; worker: number; i: number }>('items');
-  const docs = await Promise.all(Array.from({ length: config.count }, (_, i) => items.insert({ worker: config.worker, i })));
+  const items = new BucketDB(adapterFor(config.backend), config.dbPath).collection<{
+    id: string;
+    worker: number;
+    i: number;
+  }>('items');
+  const docs = await Promise.all(
+    Array.from({ length: config.count }, (_, i) => items.insert({ worker: config.worker, i }))
+  );
   console.log(JSON.stringify(docs.map(doc => doc.id)));
 }

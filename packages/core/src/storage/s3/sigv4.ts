@@ -48,7 +48,10 @@ async function hmac(key: Uint8Array | ArrayBuffer, data: string): Promise<ArrayB
 
 /** `20130524T000000Z` */
 function amzDate(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  return date
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
 }
 
 /**

@@ -37,7 +37,8 @@ function parseJson(text: string, what: string): unknown {
 }
 
 function object(value: unknown, what: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new ValidationError(`${what} must be a JSON object`);
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    throw new ValidationError(`${what} must be a JSON object`);
   return value as Record<string, unknown>;
 }
 
@@ -88,7 +89,8 @@ async function main(): Promise<number> {
       const sort = Object.fromEntries(
         (values.sort ?? []).map(spec => {
           const [field, direction = 'asc'] = spec.split(':');
-          if (direction !== 'asc' && direction !== 'desc') throw new ValidationError(`--sort ${spec}: use field, field:asc or field:desc`);
+          if (direction !== 'asc' && direction !== 'desc')
+            throw new ValidationError(`--sort ${spec}: use field, field:asc or field:desc`);
           return [field, direction === 'asc' ? 1 : -1] as const;
         })
       );
@@ -103,19 +105,25 @@ async function main(): Promise<number> {
       await collection.delete(required(args[0], 'id'));
       return 0;
     case 'export':
-      for (const { _etag, ...document } of await collection.find({})) process.stdout.write(`${JSON.stringify(document)}\n`);
+      for (const { _etag, ...document } of await collection.find({}))
+        process.stdout.write(`${JSON.stringify(document)}\n`);
       return 0;
     case 'import': {
       // Written in the storage format directly so a restored backup keeps ids and timestamps.
       const prefix = docsPrefix(dbPath, validateName('collection name', name));
-      const lines = stdinOr(args[0] === undefined ? undefined : readFileSync(args[0], 'utf8')).split('\n').filter(line => line.trim());
+      const lines = stdinOr(args[0] === undefined ? undefined : readFileSync(args[0], 'utf8'))
+        .split('\n')
+        .filter(line => line.trim());
       const documents = lines.map((line, index) => object(parseJson(line, `line ${index + 1}`), `line ${index + 1}`));
       for (let start = 0; start < documents.length; start += 16) {
         await Promise.all(
           documents.slice(start, start + 16).map(({ _etag, ...document }) => {
             if (typeof document.id !== 'string') return collection.insert(document);
             const { id, ...body } = document;
-            return adapter.put(`${prefix}${validateName('document ID', id)}.json`, encoder.encode(JSON.stringify({ id, ...body })));
+            return adapter.put(
+              `${prefix}${validateName('document ID', id)}.json`,
+              encoder.encode(JSON.stringify({ id, ...body }))
+            );
           })
         );
       }
@@ -135,7 +143,9 @@ main().then(
     process.exitCode = code;
   },
   (error: unknown) => {
-    console.error(`bucket-db: ${error instanceof BucketDBError || error instanceof TypeError ? error.message : String(error)}`);
+    console.error(
+      `bucket-db: ${error instanceof BucketDBError || error instanceof TypeError ? error.message : String(error)}`
+    );
     process.exitCode = 1;
   }
 );

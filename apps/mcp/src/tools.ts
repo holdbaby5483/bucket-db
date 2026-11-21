@@ -129,11 +129,7 @@ export function registerTools(server: McpServer, db: BucketDB): void {
     async ({ collection, id, data, etag }) => {
       try {
         const col = db.collection<AnyDocument>(collection);
-        const doc = await col.update(
-          id,
-          data as Partial<AnyDocument>,
-          etag ? { etag } : undefined
-        );
+        const doc = await col.update(id, data as Partial<AnyDocument>, etag ? { etag } : undefined);
         return { content: [{ type: 'text', text: JSON.stringify(doc, null, 2) }] };
       } catch (err) {
         if (err instanceof DocumentNotFoundError) {

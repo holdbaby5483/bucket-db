@@ -12,13 +12,19 @@ async function crud(adapter, label) {
   const items = new BucketDB(adapter, 'smoke').collection('items');
   const a = await items.insert({ n: 1 });
   const b = await items.insert({ n: 2 });
-  assert.deepEqual((await items.find({ n: { $gte: 2 } })).map(doc => doc.id), [b.id]);
+  assert.deepEqual(
+    (await items.find({ n: { $gte: 2 } })).map(doc => doc.id),
+    [b.id]
+  );
   const updated = await items.update(a.id, { n: 3 }, { etag: a._etag });
   assert.equal(updated.n, 3);
   await assert.rejects(items.update(a.id, { n: 4 }, { etag: a._etag }), ConcurrentUpdateError);
   await items.delete(b.id);
   assert.equal(await items.findById(b.id), null);
-  assert.deepEqual((await items.find({})).map(doc => doc.n), [3]);
+  assert.deepEqual(
+    (await items.find({})).map(doc => doc.n),
+    [3]
+  );
   console.log(`${label}: ok`);
 }
 
@@ -36,16 +42,24 @@ function startS3Stub() {
       response.writeHead(status, headers);
       response.end(body);
     };
-    const error = (status, code) => send(status, { 'content-type': 'application/xml' }, `<Error><Code>${code}</Code></Error>`);
+    const error = (status, code) =>
+      send(status, { 'content-type': 'application/xml' }, `<Error><Code>${code}</Code></Error>`);
 
     if (request.method === 'GET' && url.searchParams.get('list-type') === '2') {
       const prefix = url.searchParams.get('prefix') ?? '';
       const contents = [...objects.keys()]
         .filter(name => name.startsWith(prefix))
         .sort()
-        .map(name => `<Contents><Key>${encodeURIComponent(name)}</Key><ETag>&quot;${objects.get(name).etag}&quot;</ETag></Contents>`)
+        .map(
+          name =>
+            `<Contents><Key>${encodeURIComponent(name)}</Key><ETag>&quot;${objects.get(name).etag}&quot;</ETag></Contents>`
+        )
         .join('');
-      return send(200, { 'content-type': 'application/xml' }, `<ListBucketResult><IsTruncated>false</IsTruncated>${contents}</ListBucketResult>`);
+      return send(
+        200,
+        { 'content-type': 'application/xml' },
+        `<ListBucketResult><IsTruncated>false</IsTruncated>${contents}</ListBucketResult>`
+      );
     }
     if (request.method === 'GET') {
       return existing ? send(200, { etag: `"${existing.etag}"` }, existing.body) : error(404, 'NoSuchKey');

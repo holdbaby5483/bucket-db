@@ -72,7 +72,9 @@ export class S3Adapter extends S3Client {
       region,
       endpoint:
         options.endpoint ?? (env.AWS_ENDPOINT_URL_S3 || env.AWS_ENDPOINT_URL || `https://s3.${region}.amazonaws.com`),
-      credentials: resolveCredentials(options.credentials, [['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN']]),
+      credentials: resolveCredentials(options.credentials, [
+        ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN'],
+      ]),
     });
     super(resolved, AWS_DIALECT);
   }

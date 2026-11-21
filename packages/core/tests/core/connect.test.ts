@@ -2,7 +2,14 @@ import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BucketDB, FileSystemAdapter, MemoryStorageAdapter, OSSAdapter, S3Adapter, ValidationError } from '../../src/index.js';
+import {
+  BucketDB,
+  FileSystemAdapter,
+  MemoryStorageAdapter,
+  OSSAdapter,
+  S3Adapter,
+  ValidationError,
+} from '../../src/index.js';
 import { openUrl } from '../../src/url.js';
 import { startFakeS3 } from '../support/fake-s3';
 
@@ -39,7 +46,9 @@ describe('connection URLs', () => {
   });
 
   test('unknown parameters, schemes and missing buckets are refused', () => {
-    expect(failure('s3://bucket?region=x&secretAccessKey=abc').message).toContain('Unknown parameter "secretAccessKey"');
+    expect(failure('s3://bucket?region=x&secretAccessKey=abc').message).toContain(
+      'Unknown parameter "secretAccessKey"'
+    );
     expect(failure('oss://bucket?forcePathStyle=true').message).toContain('Unknown parameter');
     expect(failure('ftp://bucket').message).toContain('Unsupported scheme');
     expect(failure('s3:///prefix?region=x').message).toContain('need a bucket');
@@ -61,10 +70,17 @@ describe('connection URLs', () => {
   test('connect works end to end on file, memory and an S3 endpoint', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bucketdb-connect-'));
     const s3 = startFakeS3();
-    const saved = { AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY };
+    const saved = {
+      AWS_ACCESS_KEY_ID: process.env.AWS_ACCESS_KEY_ID,
+      AWS_SECRET_ACCESS_KEY: process.env.AWS_SECRET_ACCESS_KEY,
+    };
     Object.assign(process.env, { AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test' });
     try {
-      for (const url of [`file://${dir}`, 'memory://x', `s3://${s3.bucket}/p?region=us-east-1&endpoint=${encodeURIComponent(s3.url)}`]) {
+      for (const url of [
+        `file://${dir}`,
+        'memory://x',
+        `s3://${s3.bucket}/p?region=us-east-1&endpoint=${encodeURIComponent(s3.url)}`,
+      ]) {
         const items = BucketDB.connect(url).collection<{ id: string; n: number }>('items');
         await items.put('a', { n: 1 });
         expect((await items.find({})).map(doc => doc.n)).toEqual([1]);

@@ -15,7 +15,11 @@ async function cli(args: string[], options: { url?: string; stdin?: string; env?
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
   return { stdout, stderr, code };
 }
 
@@ -49,7 +53,10 @@ describe('bucket-db CLI', () => {
     await cli(['put', 'src', 'a', '{"n":1}'], { url });
     await cli(['put', 'src', 'b', '{"n":2}'], { url });
     const exported = await cli(['export', 'src'], { url });
-    const lines = exported.stdout.trim().split('\n').map(line => JSON.parse(line));
+    const lines = exported.stdout
+      .trim()
+      .split('\n')
+      .map(line => JSON.parse(line));
     expect(lines).toHaveLength(2);
     expect(lines[0]).not.toHaveProperty('_etag');
 
@@ -85,9 +92,12 @@ describe('bucket-db CLI', () => {
 
     const s3 = startFakeS3();
     try {
-      const result = await cli(['doctor', '--url', `s3://${s3.bucket}/ci?region=us-east-1&endpoint=${encodeURIComponent(s3.url)}`], {
-        env: { AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test' },
-      });
+      const result = await cli(
+        ['doctor', '--url', `s3://${s3.bucket}/ci?region=us-east-1&endpoint=${encodeURIComponent(s3.url)}`],
+        {
+          env: { AWS_ACCESS_KEY_ID: 'test', AWS_SECRET_ACCESS_KEY: 'test' },
+        }
+      );
       expect(result.stdout).toContain('ok    compare-and-swap (declared: atomic)');
       expect(result.code).toBe(0);
       expect(s3.requests.filter(request => request.method === 'PUT').length).toBeGreaterThan(0);
@@ -101,9 +111,12 @@ describe('bucket-db CLI', () => {
   test('doctor reports a backend that only pretends to create atomically', async () => {
     const s3 = startFakeS3('fake', { dialect: 'oss' });
     try {
-      const result = await cli(['doctor', '--url', `oss://${s3.bucket}?region=cn-hangzhou&endpoint=${encodeURIComponent(s3.url)}`], {
-        env: { OSS_ACCESS_KEY_ID: 'test', OSS_ACCESS_KEY_SECRET: 'test' },
-      });
+      const result = await cli(
+        ['doctor', '--url', `oss://${s3.bucket}?region=cn-hangzhou&endpoint=${encodeURIComponent(s3.url)}`],
+        {
+          env: { OSS_ACCESS_KEY_ID: 'test', OSS_ACCESS_KEY_SECRET: 'test' },
+        }
+      );
       expect(result.stdout).toContain('skip  compare-and-swap (declared: none)');
       expect(result.code).toBe(0);
     } finally {

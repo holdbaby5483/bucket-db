@@ -40,7 +40,14 @@ async function withEnv(vars: Record<string, string | undefined>, fn: () => Promi
 
 let s3: FakeS3;
 const aws = (options: Partial<S3AdapterOptions> = {}) =>
-  new S3Adapter({ bucket: s3.bucket, region: 'us-east-1', endpoint: s3.url, credentials, timeoutMs: TIMEOUT_MS, ...options });
+  new S3Adapter({
+    bucket: s3.bucket,
+    region: 'us-east-1',
+    endpoint: s3.url,
+    credentials,
+    timeoutMs: TIMEOUT_MS,
+    ...options,
+  });
 const count = (method: string) => s3.requests.filter(request => request.method === method).length;
 
 describe('SigV4', () => {
@@ -220,7 +227,11 @@ describe('S3Client over fake S3 (aws dialect)', () => {
     s3.loseResponseNext('PUT', TIMEOUT_MS * 3);
     const { etag } = await adapter.put('k', bytes('mine'), { ifNoneMatch: '*' });
     expect(etag).toBe(md5('mine'));
-    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual(['PUT 200', 'PUT 412', 'GET 200']);
+    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual([
+      'PUT 200',
+      'PUT 412',
+      'GET 200',
+    ]);
   });
 
   test('C6: ifMatch whose first attempt was applied but its response lost reports success', async () => {
@@ -256,7 +267,11 @@ describe('S3Client over fake S3 (aws dialect)', () => {
     s3.failNext('PUT', 503);
     const error = await rejection(adapter.put('k', bytes('mine'), { ifNoneMatch: '*' }));
     expect(error.kind).toBe('conflict');
-    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual(['PUT 503', 'PUT 412', 'GET 200']);
+    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual([
+      'PUT 503',
+      'PUT 412',
+      'GET 200',
+    ]);
   });
 
   test('delete is idempotent: 204 and 404 both succeed', async () => {
@@ -305,7 +320,13 @@ describe('S3Client over fake S3 (aws dialect)', () => {
 
 describe('S3Client over fake S3 (oss dialect)', () => {
   const oss = () =>
-    new OSSAdapter({ bucket: s3.bucket, region: 'oss-cn-hangzhou', endpoint: s3.url, credentials, timeoutMs: TIMEOUT_MS });
+    new OSSAdapter({
+      bucket: s3.bucket,
+      region: 'oss-cn-hangzhou',
+      endpoint: s3.url,
+      credentials,
+      timeoutMs: TIMEOUT_MS,
+    });
 
   beforeEach(() => {
     s3 = startFakeS3('fake-oss', { dialect: 'oss' });
@@ -331,7 +352,11 @@ describe('S3Client over fake S3 (oss dialect)', () => {
     const adapter = oss();
     s3.loseResponseNext('PUT', TIMEOUT_MS * 3);
     expect((await adapter.put('k', bytes('mine'), { ifNoneMatch: '*' })).etag).toBe(md5('mine'));
-    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual(['PUT 200', 'PUT 409', 'GET 200']);
+    expect(s3.requests.map(request => `${request.method} ${request.status}`)).toEqual([
+      'PUT 200',
+      'PUT 409',
+      'GET 200',
+    ]);
   });
 
   test('ifMatch throws UnsupportedError without sending a request', async () => {
@@ -371,7 +396,12 @@ describe('C8: credentials and configuration', () => {
 
   test('reads OSS region (oss- prefix stripped) and credentials from the OSS environment', () =>
     withEnv(
-      { OSS_REGION: 'oss-cn-shanghai', OSS_ACCESS_KEY_ID: 'OSSKEY', OSS_ACCESS_KEY_SECRET: 's', OSS_SESSION_TOKEN: undefined },
+      {
+        OSS_REGION: 'oss-cn-shanghai',
+        OSS_ACCESS_KEY_ID: 'OSSKEY',
+        OSS_ACCESS_KEY_SECRET: 's',
+        OSS_SESSION_TOKEN: undefined,
+      },
       async () => {
         await new OSSAdapter({ bucket: s3.bucket, endpoint: s3.url }).get('k').catch(() => undefined);
         const { headers } = s3.requests[0];

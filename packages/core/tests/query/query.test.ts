@@ -149,7 +149,11 @@ describe('Query Evaluator', () => {
     });
 
     test('mixed types order as booleans < numbers < strings', () => {
-      const mixed = [{ id: '1', v: 'x' }, { id: '2', v: 3 }, { id: '3', v: false }];
+      const mixed = [
+        { id: '1', v: 'x' },
+        { id: '2', v: 3 },
+        { id: '3', v: false },
+      ];
       expect(ids(sortDocuments(mixed, { v: 1 }))).toEqual(['3', '2', '1']);
     });
 

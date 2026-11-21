@@ -60,19 +60,13 @@ export interface StorageAdapter {
 
 export const MAX_LIST_LIMIT = 1000;
 
-export type GetManyResult =
-  | { key: string; body: Uint8Array; etag: string }
-  | { key: string; error: StorageError };
+export type GetManyResult = { key: string; body: Uint8Array; etag: string } | { key: string; error: StorageError };
 
 /**
  * Reads `keys` with at most `concurrency` requests in flight. Results follow
  * the input order; a failed read is reported in place instead of rejecting.
  */
-export async function getMany(
-  adapter: StorageAdapter,
-  keys: string[],
-  concurrency = 16
-): Promise<GetManyResult[]> {
+export async function getMany(adapter: StorageAdapter, keys: string[], concurrency = 16): Promise<GetManyResult[]> {
   const results = new Array<GetManyResult>(keys.length);
   let next = 0;
   const worker = async () => {
@@ -84,7 +78,8 @@ export async function getMany(
       } catch (error) {
         results[index] = {
           key,
-          error: error instanceof StorageError ? error : new StorageError(`Failed to read ${key}`, { key, cause: error }),
+          error:
+            error instanceof StorageError ? error : new StorageError(`Failed to read ${key}`, { key, cause: error }),
         };
       }
     }

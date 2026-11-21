@@ -33,7 +33,11 @@ async function listAll(adapter: StorageAdapter, prefix: string) {
  * The storage contract every backend must meet (M1A_PLAN §7 A and B).
  * Conditional-write cases run according to the backend's declared capabilities.
  */
-export function defineAdapterSuite(name: string, setup: () => AdapterTarget | Promise<AdapterTarget>, options: { listRounds?: number } = {}) {
+export function defineAdapterSuite(
+  name: string,
+  setup: () => AdapterTarget | Promise<AdapterTarget>,
+  options: { listRounds?: number } = {}
+) {
   describe(`storage contract: ${name}`, () => {
     let adapter: StorageAdapter;
     let prefix: string;

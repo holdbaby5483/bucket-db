@@ -10,4 +10,7 @@ const basePath = mkdtempSync(join(tmpdir(), 'bucketdb-conformance-'));
 afterAll(() => rmSync(basePath, { recursive: true, force: true }));
 
 defineAdapterSuite('filesystem', () => ({ adapter: new FileSystemAdapter({ basePath }), prefix: 'test/conformance/' }));
-defineCollectionSuite('filesystem', () => ({ adapter: new FileSystemAdapter({ basePath }), dbPath: 'test/collection' }));
+defineCollectionSuite('filesystem', () => ({
+  adapter: new FileSystemAdapter({ basePath }),
+  dbPath: 'test/collection',
+}));

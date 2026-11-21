@@ -59,20 +59,30 @@ describe('multiple processes inserting into one collection', () => {
   test('fake S3', async () => {
     const s3 = startFakeS3();
     try {
-      await insertFromProcesses({ kind: 's3-endpoint', endpoint: s3.url, bucket: s3.bucket, accessKeyId: 'test', secretAccessKey: 'test' });
+      await insertFromProcesses({
+        kind: 's3-endpoint',
+        endpoint: s3.url,
+        bucket: s3.bucket,
+        accessKeyId: 'test',
+        secretAccessKey: 'test',
+      });
     } finally {
       s3.stop();
     }
   }, 60_000);
 
-  withLocalS3('local S3', () =>
-    insertFromProcesses({
-      kind: 's3-endpoint',
-      endpoint: process.env.LOCAL_S3_ENDPOINT!,
-      bucket: process.env.LOCAL_S3_BUCKET!,
-      accessKeyId: process.env.LOCAL_S3_ACCESS_KEY_ID ?? 'test',
-      secretAccessKey: process.env.LOCAL_S3_SECRET_ACCESS_KEY ?? 'test',
-    }), 120_000);
+  withLocalS3(
+    'local S3',
+    () =>
+      insertFromProcesses({
+        kind: 's3-endpoint',
+        endpoint: process.env.LOCAL_S3_ENDPOINT!,
+        bucket: process.env.LOCAL_S3_BUCKET!,
+        accessKeyId: process.env.LOCAL_S3_ACCESS_KEY_ID ?? 'test',
+        secretAccessKey: process.env.LOCAL_S3_SECRET_ACCESS_KEY ?? 'test',
+      }),
+    120_000
+  );
 
   withOss('real OSS', () => insertFromProcesses({ kind: 'oss' }), 120_000);
   withS3('real S3', () => insertFromProcesses({ kind: 's3' }), 120_000);
