@@ -46,7 +46,7 @@ jobs:
           node-version: ${{ matrix.node }}
 
       - name: Install and build
-        run: bun install && bun run --cwd packages/core build
+        run: bun install --frozen-lockfile && bun run --cwd packages/core build
 
       - name: Benchmark the filesystem backend
         run: bun packages/core/bench/run.ts fs 100,1000 --json > bench.json
@@ -76,7 +76,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install and build
-        run: bun install && bun run --cwd packages/core build
+        run: bun install --frozen-lockfile && bun run --cwd packages/core build
 
       - name: Check the records
         run: |
