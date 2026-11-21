@@ -85,7 +85,7 @@ export function registerTools(server: McpServer, db: BucketDB): void {
         collection: z.string().describe('Collection name'),
         id: z.string().describe('Document ID'),
         data: z.record(z.unknown()).describe('Fields to update as a JSON object'),
-        etag: z.string().optional().describe('ETag for optimistic concurrency control'),
+        etag: z.string().optional().describe('ETag for optimistic concurrency control (not supported on OSS)'),
       },
     },
     async ({ collection, id, data, etag }) => {
@@ -112,7 +112,7 @@ export function registerTools(server: McpServer, db: BucketDB): void {
   server.registerTool(
     'db_delete',
     {
-      description: 'Delete a document by ID',
+      description: 'Delete a document by ID. Deleting a document that does not exist succeeds.',
       inputSchema: {
         collection: z.string().describe('Collection name'),
         id: z.string().describe('Document ID'),
@@ -124,9 +124,6 @@ export function registerTools(server: McpServer, db: BucketDB): void {
         await col.delete(id);
         return { content: [{ type: 'text', text: `Deleted document: ${id}` }] };
       } catch (err) {
-        if (err instanceof DocumentNotFoundError) {
-          return { isError: true, content: [{ type: 'text', text: `Document not found: ${id}` }] };
-        }
         return { isError: true, content: [{ type: 'text', text: String(err) }] };
       }
     }

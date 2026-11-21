@@ -23,34 +23,22 @@ export function createAdapter(): StorageAdapter {
       return new FileSystemAdapter({ basePath });
     }
 
-    case 's3': {
-      const bucket = process.env.BUCKET_DB_S3_BUCKET;
-      const region = process.env.BUCKET_DB_S3_REGION;
-      const accessKeyId = process.env.BUCKET_DB_S3_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.BUCKET_DB_S3_SECRET_ACCESS_KEY;
-
-      if (!bucket || !region || !accessKeyId || !secretAccessKey) {
-        console.error(
-          'Error: BUCKET_DB_S3_BUCKET, BUCKET_DB_S3_REGION, BUCKET_DB_S3_ACCESS_KEY_ID, BUCKET_DB_S3_SECRET_ACCESS_KEY are required for s3 adapter'
-        );
-        process.exit(1);
-      }
-      return new S3Adapter({ bucket, region, credentials: { accessKeyId, secretAccessKey } });
-    }
-
+    case 's3':
     case 'oss': {
-      const bucket = process.env.BUCKET_DB_OSS_BUCKET;
-      const region = process.env.BUCKET_DB_OSS_REGION;
-      const accessKeyId = process.env.BUCKET_DB_OSS_ACCESS_KEY_ID;
-      const secretAccessKey = process.env.BUCKET_DB_OSS_SECRET_ACCESS_KEY;
-
-      if (!bucket || !region || !accessKeyId || !secretAccessKey) {
-        console.error(
-          'Error: BUCKET_DB_OSS_BUCKET, BUCKET_DB_OSS_REGION, BUCKET_DB_OSS_ACCESS_KEY_ID, BUCKET_DB_OSS_SECRET_ACCESS_KEY are required for oss adapter'
-        );
+      const prefix = adapterType === 's3' ? 'BUCKET_DB_S3' : 'BUCKET_DB_OSS';
+      const bucket = process.env[`${prefix}_BUCKET`];
+      if (!bucket) {
+        console.error(`Error: ${prefix}_BUCKET is required for ${adapterType} adapter`);
         process.exit(1);
       }
-      return new OSSAdapter({ bucket, region, credentials: { accessKeyId, secretAccessKey } });
+      // Region and credentials are optional; when unset the adapter reads
+      // AWS_REGION / AWS_ACCESS_KEY_ID / … (s3) or OSS_REGION / OSS_ACCESS_KEY_ID / … (oss).
+      const region = process.env[`${prefix}_REGION`] || undefined;
+      const accessKeyId = process.env[`${prefix}_ACCESS_KEY_ID`];
+      const secretAccessKey = process.env[`${prefix}_SECRET_ACCESS_KEY`];
+      const credentials = accessKeyId && secretAccessKey ? { accessKeyId, secretAccessKey } : undefined;
+      const options = { bucket, region, credentials };
+      return adapterType === 's3' ? new S3Adapter(options) : new OSSAdapter(options);
     }
 
     default:

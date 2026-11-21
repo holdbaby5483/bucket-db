@@ -1,10 +1,10 @@
-import type { StorageAdapter, StorageObject, PutOptions } from '../../src/index.js';
+import type { StorageAdapter, WriteCondition, ListOptions, ListPage } from '../../src/index.js';
 
-export type StorageOperation = 'get' | 'put' | 'delete' | 'exists' | 'listKeys' | 'batchGet';
+export type StorageOperation = 'get' | 'put' | 'delete' | 'list';
 
 /**
  * Runs before a storage call. Throw to inject a failure; await to let another
- * writer act first. `batchGet` invokes it once per key.
+ * writer act first. For `list`, `key` is the prefix.
  */
 export type BeforeHook = (operation: StorageOperation, key: string) => void | Promise<void>;
 
@@ -17,14 +17,18 @@ export class FaultyAdapter implements StorageAdapter {
 
   constructor(private readonly inner: StorageAdapter) {}
 
-  async get(key: string): Promise<StorageObject> {
+  get capabilities() {
+    return this.inner.capabilities;
+  }
+
+  async get(key: string): Promise<{ body: Uint8Array; etag: string }> {
     await this.before?.('get', key);
     return this.inner.get(key);
   }
 
-  async put(key: string, data: unknown, options?: PutOptions): Promise<{ etag: string }> {
+  async put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }> {
     await this.before?.('put', key);
-    return this.inner.put(key, data, options);
+    return this.inner.put(key, body, condition);
   }
 
   async delete(key: string): Promise<void> {
@@ -32,20 +36,8 @@ export class FaultyAdapter implements StorageAdapter {
     return this.inner.delete(key);
   }
 
-  async exists(key: string): Promise<boolean> {
-    await this.before?.('exists', key);
-    return this.inner.exists(key);
-  }
-
-  async listKeys(prefix: string): Promise<string[]> {
-    await this.before?.('listKeys', prefix);
-    return this.inner.listKeys(prefix);
-  }
-
-  async batchGet(keys: string[]): Promise<Map<string, StorageObject>> {
-    for (const key of keys) {
-      await this.before?.('batchGet', key);
-    }
-    return this.inner.batchGet(keys);
+  async list(prefix: string, options?: ListOptions): Promise<ListPage> {
+    await this.before?.('list', prefix);
+    return this.inner.list(prefix, options);
   }
 }

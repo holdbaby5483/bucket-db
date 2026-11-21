@@ -70,11 +70,10 @@ async function main() {
   console.log('\n文件系统存储结构:');
   console.log(`  数据目录: ${dbPath}/`);
   console.log(`  文档: ${dbPath}/my-app/users/docs/*.json`);
-  console.log(`  索引: ${dbPath}/my-app/users/index/shard-*.json`);
-  console.log(`  元数据: *.meta 文件存储 ETag 信息`);
+  console.log('  每个文档就是一个 JSON 文件，没有索引文件；0.3.x 留下的 index/、wal/ 和 *.meta 会被忽略。');
 
   console.log('\n数据已持久化到本地文件系统！');
   console.log('重启程序后数据仍然存在。');
 }
 
-main().catch(console.error);
+await main();

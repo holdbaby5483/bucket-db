@@ -64,4 +64,4 @@ async function main() {
   console.log('Total users:', all.length);
 }
 
-main().catch(console.error);
+await main();

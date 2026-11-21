@@ -1,14 +1,21 @@
-// Core classes
-export { BucketDB } from './core/bucket-db.js';
-export { Collection } from './core/collection.js';
+export { BucketDB } from './bucket-db.js';
+export { Collection } from './collection.js';
 
-// Storage adapters
-export { MemoryStorageAdapter } from './storage/memory-adapter.js';
-export { S3Adapter } from './storage/s3-adapter.js';
-export { OSSAdapter } from './storage/oss-adapter.js';
-export { FileSystemAdapter } from './storage/fs-adapter.js';
+export { MemoryStorageAdapter } from './storage/memory.js';
+export { FileSystemAdapter } from './storage/fs.js';
+export type { FileSystemAdapterConfig } from './storage/fs.js';
+export { S3Adapter, OSSAdapter } from './storage/s3/adapters.js';
+export type { S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider } from './storage/s3/adapters.js';
+export type {
+  StorageAdapter,
+  Capabilities,
+  Guarantee,
+  WriteCondition,
+  ObjectEntry,
+  ListPage,
+  ListOptions,
+} from './storage/adapter.js';
 
-// Re-export types from @bucket-db/types
 export type {
   Document,
   InsertDocument,
@@ -18,20 +25,14 @@ export type {
   QueryFilter,
   QueryOptions,
   UpdateOptions,
-  StorageAdapter,
-  StorageObject,
-  PutOptions,
-  StorageCredentials,
-  StorageAdapterConfig,
-  ICollection,
-  CollectionMeta,
-  IndexShard,
-} from './types/index.js';
+} from './types.js';
 
 export {
   BucketDBError,
+  ValidationError,
   DocumentNotFoundError,
   ConcurrentUpdateError,
-  ValidationError,
+  UnsupportedError,
   StorageError,
-} from './types/index.js';
+} from './errors.js';
+export type { StorageErrorKind, StorageErrorOptions } from './errors.js';
