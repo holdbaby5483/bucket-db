@@ -59,6 +59,27 @@ describe('query snapshot', () => {
     ]);
   });
 
+  test('the snapshot is rewritten only when more than 16 documents changed', async () => {
+    const docs = await items.find({});
+    const snapshotWrites = () => calls.filter(([operation, key]) => operation === 'put' && key === SNAPSHOT).length;
+    const documentReads = () => calls.filter(([operation, key]) => operation === 'get' && key.includes('/docs/')).length;
+
+    await Promise.all(docs.slice(0, 16).map(doc => items.update(doc.id, { n: -1 })));
+    for (let query = 0; query < 2; query++) {
+      calls.length = 0;
+      await items.find({});
+      expect([documentReads(), snapshotWrites()]).toEqual([16, 0]);
+    }
+
+    await items.update(docs[16].id, { n: -1 });
+    calls.length = 0;
+    await items.find({});
+    expect([documentReads(), snapshotWrites()]).toEqual([17, 1]);
+    calls.length = 0;
+    await items.find({});
+    expect([documentReads(), snapshotWrites()]).toEqual([0, 0]);
+  });
+
   test('after writes, only changed documents are read and the result is current', async () => {
     const before = await items.find({});
     await items.update(before[0].id, { n: 100 });

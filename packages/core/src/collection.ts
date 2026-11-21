@@ -185,8 +185,10 @@ export class Collection<T extends Document> {
     const snapshot = useSnapshot ? await this.readSnapshot() : new Map<string, SnapshotEntry>();
     const documents = new Array<T | undefined>(listed.length);
     const missing: number[] = [];
+    let listedInSnapshot = 0;
     listed.forEach(({ etag, id }, index) => {
       const cached = snapshot.get(id);
+      if (cached) listedInSnapshot++;
       if (cached && cached.etag === etag) documents[index] = { ...cached.body, id, _etag: etag } as T;
       else missing.push(index);
     });
@@ -202,8 +204,9 @@ export class Collection<T extends Document> {
     });
 
     const present = documents.filter((document): document is T => document !== undefined);
-    const dropped = snapshot.size - (listed.length - missing.length);
-    if (useSnapshot && missing.length + dropped > SNAPSHOT_REWRITE_THRESHOLD) {
+    // documents read individually (new or changed) plus snapshot entries of deleted documents
+    const deleted = snapshot.size - listedInSnapshot;
+    if (useSnapshot && missing.length + deleted > SNAPSHOT_REWRITE_THRESHOLD) {
       await this.writeSnapshot(present);
     } else {
       this.checkEnvelope(present.length, 0);
