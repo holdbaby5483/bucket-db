@@ -47,6 +47,11 @@ export interface ListOptions {
  */
 export interface StorageAdapter {
   readonly capabilities: Capabilities;
+  /**
+   * True when every read is a network round trip. Collection then keeps a
+   * snapshot so a query does not GET every document.
+   */
+  readonly remote?: boolean;
   get(key: string): Promise<{ body: Uint8Array; etag: string }>;
   put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }>;
   delete(key: string): Promise<void>;

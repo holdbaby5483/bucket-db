@@ -1,5 +1,7 @@
 export { BucketDB } from './bucket-db.js';
+export type { BucketDBOptions } from './bucket-db.js';
 export { Collection } from './collection.js';
+export type { CollectionOptions } from './collection.js';
 
 export { MemoryStorageAdapter } from './storage/memory.js';
 export { FileSystemAdapter } from './storage/fs.js';
@@ -25,6 +27,8 @@ export type {
   QueryFilter,
   QueryOptions,
   UpdateOptions,
+  Logger,
+  LogEvent,
 } from './types.js';
 
 export {

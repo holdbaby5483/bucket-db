@@ -170,7 +170,7 @@ export function defineCollectionSuite(name: string, setup: () => CollectionTarge
       const storage = new FaultyAdapter(adapter);
       let removed: string | undefined;
       storage.before = async (operation, key) => {
-        if (operation === 'get' && removed === undefined) {
+        if (operation === 'get' && key.includes('/docs/') && removed === undefined) {
           removed = key;
           await adapter.delete(key);
         }

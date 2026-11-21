@@ -21,6 +21,10 @@ export class FaultyAdapter implements StorageAdapter {
     return this.inner.capabilities;
   }
 
+  get remote() {
+    return this.inner.remote;
+  }
+
   async get(key: string): Promise<{ body: Uint8Array; etag: string }> {
     await this.before?.('get', key);
     return this.inner.get(key);

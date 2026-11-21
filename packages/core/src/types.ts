@@ -45,3 +45,12 @@ export interface UpdateOptions {
   /** Only update if the document still has this etag. */
   etag?: string;
 }
+
+export interface LogEvent {
+  level: 'warn' | 'error';
+  message: string;
+  error?: unknown;
+}
+
+/** Receives problems that do not fail the current call. Default: `console.warn`. */
+export type Logger = (event: LogEvent) => void;

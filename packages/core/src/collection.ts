@@ -1,10 +1,11 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, UpdateOptions } from './types.js';
+import type { Document, InsertDocument, UpdateDocument, QueryFilter, QueryOptions, UpdateOptions, Logger } from './types.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { getMany } from './storage/adapter.js';
 import { ConcurrentUpdateError, DocumentNotFoundError, StorageError, UnsupportedError } from './errors.js';
 import { docsPrefix, isValidName, validateName } from './keys.js';
 import { evaluateFilter, validateFilter } from './query.js';
+import { SNAPSHOT_NAME, encodeSnapshot, parseSnapshot, type SnapshotEntry } from './snapshot.js';
 
 /** Conflicting writes an etag-less update retries before giving up. */
 const UPDATE_RETRIES = 5;
@@ -18,19 +19,40 @@ function withoutSystemFields(data: object): Record<string, unknown> {
   return rest;
 }
 
+export interface CollectionOptions {
+  /** Receives snapshot write failures and envelope warnings. Default: console.warn. */
+  logger?: Logger;
+}
+
+/** Documents fetched or dropped beyond which a query rewrites the snapshot. */
+const SNAPSHOT_REWRITE_THRESHOLD = 16;
+/** Collections beyond this are outside the documented envelope. */
+const ENVELOPE_DOCUMENTS = 10_000;
+const ENVELOPE_BYTES = 10 * 1024 * 1024;
+
+const defaultLogger: Logger = ({ message, error }) => console.warn(`[bucket-db] ${message}`, ...(error ? [error] : []));
+
 /**
  * A set of JSON documents stored one object per document at
  * `<dbPath>/<name>/docs/<id>.json`. Every write is a single storage request.
  */
 export class Collection<T extends Document> {
   private readonly prefix: string;
+  private readonly snapshotKey: string;
+  private readonly logger: Logger;
+  /** Cleared after a permission error, e.g. read-only credentials. */
+  private snapshotWritable = true;
+  private warnedEnvelope = false;
 
   constructor(
     private readonly adapter: StorageAdapter,
     dbPath: string,
-    name: string
+    name: string,
+    options: CollectionOptions = {}
   ) {
     this.prefix = docsPrefix(dbPath, validateName('collection name', name));
+    this.snapshotKey = `${this.prefix.slice(0, -'docs/'.length)}${SNAPSHOT_NAME}`;
+    this.logger = options.logger ?? defaultLogger;
   }
 
   private keyOf(id: string): string {
@@ -98,33 +120,104 @@ export class Collection<T extends Document> {
     return options.limit ? matched.slice(offset, offset + options.limit) : matched.slice(offset);
   }
 
-  private async readAll(): Promise<T[]> {
-    const keys: string[] = [];
+  private idOf(key: string): string {
+    const name = key.slice(this.prefix.length);
+    const id = name.endsWith('.json') ? name.slice(0, -'.json'.length) : '';
+    if (!isValidName(id)) {
+      throw new StorageError(`${key} is not a document key (expected <id>.json)`, { key });
+    }
+    return id;
+  }
+
+  private async readSnapshot(): Promise<Map<string, SnapshotEntry>> {
+    try {
+      const { body } = await this.adapter.get(this.snapshotKey);
+      const entries = parseSnapshot(body);
+      if (!entries) this.logger({ level: 'warn', message: `${this.snapshotKey} is not a valid snapshot; rebuilding it` });
+      return entries ?? new Map();
+    } catch (error) {
+      // a missing snapshot is rebuilt; any other read failure fails the query
+      if (error instanceof StorageError && error.kind === 'not-found') return new Map();
+      throw error;
+    }
+  }
+
+  /** Lost, overwritten or failed snapshot writes only cost speed, so failures are logged, not thrown. */
+  private async writeSnapshot(documents: T[], throwOnError = false): Promise<void> {
+    const body = encodeSnapshot(documents);
+    this.checkEnvelope(documents.length, body.length);
+    if (!this.snapshotWritable && !throwOnError) return;
+    try {
+      await this.adapter.put(this.snapshotKey, body);
+    } catch (error) {
+      if (throwOnError) throw error;
+      if (error instanceof StorageError && (error.status === 401 || error.status === 403)) this.snapshotWritable = false;
+      this.logger({ level: 'error', message: `Failed to write ${this.snapshotKey}; queries stay correct but slower`, error });
+    }
+  }
+
+  private checkEnvelope(documents: number, bytes: number): void {
+    if (this.warnedEnvelope || (documents <= ENVELOPE_DOCUMENTS && bytes <= ENVELOPE_BYTES)) return;
+    this.warnedEnvelope = true;
+    this.logger({
+      level: 'warn',
+      message: `Collection ${this.prefix.slice(0, -1)} has ${documents} documents (${Math.round(bytes / 1024)} kB); BucketDB is designed for at most ${ENVELOPE_DOCUMENTS} documents and ${ENVELOPE_BYTES / 1024 / 1024} MB per collection, and queries will keep getting slower`,
+    });
+  }
+
+  /**
+   * Lists the collection, then takes each document from the snapshot when its
+   * etag still matches and GETs the rest. The list is the authority: the
+   * snapshot never adds, removes or changes a document in the result.
+   */
+  private async readAll(useSnapshot = this.adapter.remote === true): Promise<T[]> {
+    const listed: Array<{ key: string; etag: string; id: string }> = [];
     let cursor: string | undefined;
     do {
       const page = await this.adapter.list(this.prefix, { cursor });
-      for (const { key } of page.entries) {
-        const name = key.slice(this.prefix.length);
-        if (name.startsWith('.')) continue; // hidden files (e.g. .DS_Store) are never documents
-        keys.push(key);
+      for (const { key, etag } of page.entries) {
+        if (key.slice(this.prefix.length).startsWith('.')) continue; // hidden files (e.g. .DS_Store) are never documents
+        listed.push({ key, etag, id: this.idOf(key) });
       }
       cursor = page.cursor;
     } while (cursor);
 
-    const documents: T[] = [];
-    for (const result of await getMany(this.adapter, keys)) {
+    const snapshot = useSnapshot ? await this.readSnapshot() : new Map<string, SnapshotEntry>();
+    const documents = new Array<T | undefined>(listed.length);
+    const missing: number[] = [];
+    listed.forEach(({ etag, id }, index) => {
+      const cached = snapshot.get(id);
+      if (cached && cached.etag === etag) documents[index] = { ...cached.body, id, _etag: etag } as T;
+      else missing.push(index);
+    });
+
+    const fetched = await getMany(this.adapter, missing.map(index => listed[index].key));
+    fetched.forEach((result, position) => {
       if ('error' in result) {
-        if (result.error.kind === 'not-found') continue; // deleted after the list
+        if (result.error.kind === 'not-found') return; // deleted after the list
         throw result.error;
       }
-      const name = result.key.slice(this.prefix.length);
-      const id = name.endsWith('.json') ? name.slice(0, -'.json'.length) : '';
-      if (!isValidName(id)) {
-        throw new StorageError(`${result.key} is not a document key (expected <id>.json)`, { key: result.key });
-      }
-      documents.push(this.decode(result.key, id, result.body, result.etag));
+      const index = missing[position];
+      documents[index] = this.decode(result.key, listed[index].id, result.body, result.etag);
+    });
+
+    const present = documents.filter((document): document is T => document !== undefined);
+    const dropped = snapshot.size - (listed.length - missing.length);
+    if (useSnapshot && missing.length + dropped > SNAPSHOT_REWRITE_THRESHOLD) {
+      await this.writeSnapshot(present);
+    } else {
+      this.checkEnvelope(present.length, 0);
     }
-    return documents;
+    return present;
+  }
+
+  /**
+   * Rewrites the snapshot from the documents as they are now, removing the
+   * contents of deleted documents from it. No-op on local backends.
+   */
+  async compact(): Promise<void> {
+    if (this.adapter.remote !== true) return;
+    await this.writeSnapshot(await this.readAll(false), true);
   }
 
   /**

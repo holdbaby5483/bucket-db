@@ -93,6 +93,7 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  */
 export class S3Client implements StorageAdapter {
   readonly capabilities: Capabilities;
+  readonly remote = true;
 
   constructor(
     private readonly options: ResolvedOptions,
