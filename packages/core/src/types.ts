@@ -17,6 +17,12 @@ export type InsertDocument<T extends Document> = Omit<T, SystemField>;
 /** Fields accepted by `update`: a partial document without system fields. */
 export type UpdateDocument<T extends Document> = Partial<Omit<T, SystemField>>;
 
+/**
+ * A document as returned by BucketDB: `_etag` is always set. `_createdAt` and
+ * `_updatedAt` stay optional because a file placed in `docs/` by hand may lack them.
+ */
+export type Stored<T extends Document> = T & { _etag: string };
+
 export type QueryOperator = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin';
 
 export type QueryValue<T> =
@@ -36,7 +42,10 @@ export type QueryFilter<T> = {
   [K in keyof T]?: QueryValue<T[K]>;
 };
 
-export interface QueryOptions {
+/** Fields to sort by, in order: 1 ascending, -1 descending. */
+export type SortSpec<T> = Partial<Record<(keyof T & string) | SystemField, 1 | -1>>;
+
+export interface QueryOptions<T = Document> {
   /** 0 returns no documents. Default: all. */
   limit?: number;
   offset?: number;
@@ -44,7 +53,7 @@ export interface QueryOptions {
    * Fields to sort by, in order: 1 ascending, -1 descending. Missing values sort
    * last. Ties, and the default order, are `_createdAt` then `id`.
    */
-  sort?: Record<string, 1 | -1>;
+  sort?: SortSpec<T>;
 }
 
 export interface InsertOptions {

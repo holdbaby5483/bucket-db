@@ -32,6 +32,9 @@ jobs:
       - name: Build packages
         run: bun run build
 
+      - name: Type-check, including the public API type tests
+        run: bun run --cwd packages/core typecheck
+
       - name: Run unit tests
         run: bun test
 
@@ -49,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [20, 22]
+        node: [22, 24]
 
     steps:
       - name: Checkout code

@@ -1,7 +1,7 @@
 export { BucketDB } from './bucket-db.js';
 export type { BucketDBOptions } from './bucket-db.js';
-export { Collection } from './collection.js';
-export type { CollectionOptions } from './collection.js';
+// A type only: collections come from db.collection(name).
+export type { Collection } from './collection.js';
 
 export { MemoryStorageAdapter } from './storage/memory.js';
 export { FileSystemAdapter } from './storage/fs.js';
@@ -30,6 +30,8 @@ export type {
   InsertOptions,
   Logger,
   LogEvent,
+  Stored,
+  SortSpec,
 } from './types.js';
 
 export {

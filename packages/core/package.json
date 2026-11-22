@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit -p . && tsc -p tests/types",
     "test": "bun test",
     "test:watch": "bun test --watch"
   },
@@ -53,6 +54,6 @@
     "url": "https://github.com/holdbaby5483/bucket-db/issues"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

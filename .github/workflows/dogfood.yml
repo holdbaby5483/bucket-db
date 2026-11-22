@@ -34,9 +34,9 @@ jobs:
           - runtime: bun
             cli: bun packages/core/dist/cli.js
             node: 22
-          - runtime: node20
+          - runtime: node24
             cli: node packages/core/dist/cli.js
-            node: 20
+            node: 24
           - runtime: node22
             cli: node packages/core/dist/cli.js
             node: 22

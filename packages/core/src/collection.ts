@@ -8,6 +8,7 @@ import type {
   QueryOptions,
   UpdateOptions,
   Logger,
+  Stored,
 } from './types.js';
 import type { StorageAdapter } from './storage/adapter.js';
 import { getMany } from './storage/adapter.js';
@@ -76,7 +77,7 @@ export class Collection<T extends Document> {
   }
 
   /** The key decides the id and the service decides the etag, whatever the body says. */
-  private decode(key: string, id: string, body: Uint8Array, etag: string): T {
+  private decode(key: string, id: string, body: Uint8Array, etag: string): Stored<T> {
     let data: unknown;
     try {
       data = JSON.parse(decoder.decode(body));
@@ -86,7 +87,7 @@ export class Collection<T extends Document> {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
       throw new StorageError(`${key} is not a JSON object`, { key });
     }
-    return { ...data, id, _etag: etag } as T;
+    return { ...data, id, _etag: etag } as Stored<T>;
   }
 
   private encode(document: T): Uint8Array {
@@ -98,7 +99,7 @@ export class Collection<T extends Document> {
    * Creates a document. One conditional PUT. With `options.id` the call fails
    * with DocumentExistsError when that id is taken; otherwise an id is generated.
    */
-  async insert(data: InsertDocument<T>, options: InsertOptions = {}): Promise<T> {
+  async insert(data: InsertDocument<T>, options: InsertOptions = {}): Promise<Stored<T>> {
     const id = options.id ?? crypto.randomUUID();
     const key = this.keyOf(id);
     const atomic = this.adapter.capabilities.createIfAbsent !== 'none';
@@ -120,7 +121,7 @@ export class Collection<T extends Document> {
    * Creates or replaces the whole document under `id`. One unconditional PUT, so
    * repeating it is harmless; `_createdAt` is reset, the old document is not read.
    */
-  async put(id: string, data: InsertDocument<T>): Promise<T> {
+  async put(id: string, data: InsertDocument<T>): Promise<Stored<T>> {
     const timestamp = new Date().toISOString();
     const document = { ...withoutSystemFields(data), id, _createdAt: timestamp, _updatedAt: timestamp } as T;
     const { etag } = await this.adapter.put(this.keyOf(id), this.encode(document));
@@ -128,7 +129,7 @@ export class Collection<T extends Document> {
   }
 
   /** Returns `null` only when the document does not exist; other failures throw. One GET. */
-  async findById(id: string): Promise<T | null> {
+  async findById(id: string): Promise<Stored<T> | null> {
     const key = this.keyOf(id);
     try {
       const { body, etag } = await this.adapter.get(key);
@@ -144,7 +145,7 @@ export class Collection<T extends Document> {
    * current) and filters, sorts and pages in memory. An `id` equality filter
    * reads a single document instead.
    */
-  async find(filter: QueryFilter<T> = {}, options: QueryOptions = {}): Promise<T[]> {
+  async find(filter: QueryFilter<T> = {}, options: QueryOptions<T> = {}): Promise<Stored<T>[]> {
     validateFilter(filter);
     sortDocuments([], options.sort); // validates the sort spec before any request
     const { offset = 0, limit, sort } = options;
@@ -152,7 +153,7 @@ export class Collection<T extends Document> {
       throw new ValidationError('offset and limit must be non-negative integers');
     }
 
-    let documents: T[];
+    let documents: Stored<T>[];
     if (typeof filter.id === 'string') {
       const document = isValidName(filter.id) ? await this.findById(filter.id) : null;
       documents = document ? [document] : [];
@@ -160,8 +161,8 @@ export class Collection<T extends Document> {
       documents = await this.readAll();
     }
 
-    const matched = documents.filter(document => evaluateFilter(document as Record<string, unknown>, filter));
-    sortDocuments(matched as Array<T & Record<string, unknown>>, sort);
+    const matched = documents.filter(document => evaluateFilter(document, filter));
+    sortDocuments(matched, sort);
     return matched.slice(offset, limit === undefined ? undefined : offset + limit);
   }
 
@@ -254,17 +255,17 @@ export class Collection<T extends Document> {
    * etag still matches and GETs the rest. The list is the authority: the
    * snapshot never adds, removes or changes a document in the result.
    */
-  private async readAll(useSnapshot = this.adapter.remote === true): Promise<T[]> {
+  private async readAll(useSnapshot = this.adapter.remote === true): Promise<Stored<T>[]> {
     const listed = await this.listDocuments();
 
     const snapshot = useSnapshot ? await this.readSnapshot() : new Map<string, SnapshotEntry>();
-    const documents = new Array<T | undefined>(listed.length);
+    const documents = new Array<Stored<T> | undefined>(listed.length);
     const missing: number[] = [];
     let listedInSnapshot = 0;
     listed.forEach(({ etag, id }, index) => {
       const cached = snapshot.get(id);
       if (cached) listedInSnapshot++;
-      if (cached && cached.etag === etag) documents[index] = { ...cached.body, id, _etag: etag } as T;
+      if (cached && cached.etag === etag) documents[index] = { ...cached.body, id, _etag: etag } as Stored<T>;
       else missing.push(index);
     });
 
@@ -281,7 +282,7 @@ export class Collection<T extends Document> {
       documents[index] = this.decode(result.key, listed[index].id, result.body, result.etag);
     });
 
-    const present = documents.filter((document): document is T => document !== undefined);
+    const present = documents.filter((document): document is Stored<T> => document !== undefined);
     // documents read individually (new or changed) plus snapshot entries of deleted documents
     const deleted = snapshot.size - listedInSnapshot;
     if (useSnapshot && missing.length + deleted > SNAPSHOT_REWRITE_THRESHOLD) {
@@ -309,7 +310,7 @@ export class Collection<T extends Document> {
    * writers are retried so concurrent partial updates all apply; otherwise the
    * last write wins.
    */
-  async update(id: string, data: UpdateDocument<T>, options: UpdateOptions = {}): Promise<T> {
+  async update(id: string, data: UpdateDocument<T>, options: UpdateOptions = {}): Promise<Stored<T>> {
     const key = this.keyOf(id);
     const compareAndSwap = this.adapter.capabilities.compareAndSwap !== 'none';
     if (options.etag !== undefined && !compareAndSwap) {
@@ -332,7 +333,7 @@ export class Collection<T extends Document> {
         _updatedAt: new Date().toISOString(),
       } as T;
       try {
-        const condition = compareAndSwap ? { ifMatch: current._etag ?? '' } : undefined;
+        const condition = compareAndSwap ? { ifMatch: current._etag } : undefined;
         const { etag } = await this.adapter.put(key, this.encode(updated), condition);
         return { ...updated, _etag: etag };
       } catch (error) {

@@ -80,9 +80,9 @@ function evaluateCondition(value: unknown, condition: unknown): boolean {
  * True when `document` satisfies every condition in `filter` (AND).
  * Call `validateFilter` first.
  */
-export function evaluateFilter(document: Record<string, unknown>, filter: QueryFilter<unknown>): boolean {
+export function evaluateFilter(document: object, filter: QueryFilter<unknown>): boolean {
   for (const [field, condition] of Object.entries(filter)) {
-    const value = Object.hasOwn(document, field) ? document[field] : undefined;
+    const value = Object.hasOwn(document, field) ? (document as Record<string, unknown>)[field] : undefined;
     if (!evaluateCondition(value, condition)) return false;
   }
   return true;
@@ -100,25 +100,28 @@ function compareValues(a: unknown, b: unknown): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-export type SortSpec = Record<string, 1 | -1>;
+export type SortSpec = Partial<Record<string, 1 | -1>>;
 
 /**
  * Sorts by the fields of `sort` in order (1 ascending, -1 descending), then by
  * `_createdAt` and `id`. Missing or null values sort last in either direction.
+ * Fields set to `undefined` are ignored.
  */
-export function sortDocuments<D extends Record<string, unknown>>(documents: D[], sort: SortSpec = {}): D[] {
-  const keys: Array<[string, number]> = Object.entries(sort);
-  for (const [field, direction] of keys) {
+export function sortDocuments<D extends object>(documents: D[], sort: SortSpec = {}): D[] {
+  const keys: Array<[string, number]> = [];
+  for (const [field, direction] of Object.entries(sort)) {
+    if (direction === undefined) continue;
     if (RESERVED_FIELDS.has(field) || (direction !== 1 && direction !== -1)) {
       throw new ValidationError(`Invalid sort ${JSON.stringify({ [field]: direction })}: use 1 or -1 per field`);
     }
+    keys.push([field, direction]);
   }
-  for (const field of ['_createdAt', 'id']) if (!(field in sort)) keys.push([field, 1]);
+  for (const field of ['_createdAt', 'id']) if (!keys.some(([key]) => key === field)) keys.push([field, 1]);
 
   return documents.sort((a, b) => {
     for (const [field, direction] of keys) {
-      const left = a[field] ?? undefined;
-      const right = b[field] ?? undefined;
+      const left = (a as Record<string, unknown>)[field] ?? undefined;
+      const right = (b as Record<string, unknown>)[field] ?? undefined;
       if (left === undefined || right === undefined) {
         if (left !== right) return left === undefined ? 1 : -1;
         continue;
