@@ -5,6 +5,20 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1.0.0 is expected to have no API change from 0.6.0; what it adds is a promise.
+
+### Added
+
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): from 1.0, breaking changes to exports (including types), error classes and `StorageError.kind`, the storage adapter contract, the storage format, the CLI (commands, flags, output, exit codes), connection URLs and the documented guarantees only ship in a major release.
+
+### Documentation
+
+- `NO_PROXY` is honoured on Bun and on Node with `NODE_USE_ENV_PROXY=1` (measured).
+- The guarantees page records that the real S3 suite runs in CI.
+- API pages on the website no longer show a literal `&lt;` in headings.
+
 ## [0.6.0] - 2026-11-22
 
 The last breaking release before 1.0: it settles the public types from the 1.0 API review. The storage format, the CLI, connection URLs, the MCP server and runtime behaviour are unchanged, so 0.5 and 0.6 read and write the same collections. Upgrading from 0.5: [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md).
