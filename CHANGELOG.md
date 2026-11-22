@@ -21,7 +21,7 @@ Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1
 
 ## [0.6.0] - 2026-11-22
 
-The last breaking release before 1.0: it settles the public types from the 1.0 API review. The storage format, the CLI, connection URLs, the MCP server and runtime behaviour are unchanged, so 0.5 and 0.6 read and write the same collections. Upgrading from 0.5: [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md).
+The last breaking release before 1.0: it settles the public types from the [1.0 API review](docs/history/API_REVIEW_1.0.md). The storage format, the CLI, connection URLs, the MCP server and runtime behaviour are unchanged, so 0.5 and 0.6 read and write the same collections. Upgrading from 0.5: [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md).
 
 ### BREAKING
 

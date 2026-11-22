@@ -1,6 +1,6 @@
 # BucketDB 路线图
 
-依据：`REPOSITORY_EVALUATION_SYNTHESIS.md`（下称“评价”，条目编号沿用其第 4 节）。
+依据：[`docs/history/REPOSITORY_EVALUATION_SYNTHESIS.md`](docs/history/REPOSITORY_EVALUATION_SYNTHESIS.md)（下称“评价”，条目编号沿用其第 4 节）。
 起点：`@hold-baby/bucket-db@0.3.1`，核心源码 2,070 行。
 
 本文是产品与架构层面的路线图，不是逐任务的实施计划。
@@ -13,7 +13,7 @@
 |---|---|
 | M0、M1a、M1b | 已完成。0.3.2、0.4.0-beta.0、0.4.0 没有单独发布，内容并入 0.5.0 |
 | M2 | 已完成，0.5.0 已发布到 npm（trusted publishing，带 provenance） |
-| 1.0 前 API 审查 | 已完成（`API_REVIEW_1.0.md`），破坏性部分在 0.6.0 发布 |
+| 1.0 前 API 审查 | 已完成（[`docs/history/API_REVIEW_1.0.md`](docs/history/API_REVIEW_1.0.md)），破坏性部分在 0.6.0 发布 |
 | M3 | 只剩一项出口标准：自用数据集连续 100 次 CI 运行无失败（Dogfood 工作流每 4 小时一次，2026-11-22 开始计数） |
 
 M3 其余各项：保证表已定稿（`docs/GUARANTEES.md`），兼容策略已写进 `docs/COMPATIBILITY.md`；lint、Bun 版本固定、冻结锁文件、release action 替换已完成；真实 OSS 和 S3 的一致性套件都在 CI 中运行。

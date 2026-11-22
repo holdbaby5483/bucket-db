@@ -51,7 +51,7 @@ function random(seed: number) {
 }
 
 /**
- * Collection behaviour every backend must give (M1A_PLAN §7 D2–D13).
+ * Collection behaviour every backend must give (cases D2–D18; docs/GUARANTEES.md maps them to guarantees).
  */
 export function defineCollectionSuite(name: string, setup: () => CollectionTarget | Promise<CollectionTarget>) {
   describe(`collection: ${name}`, () => {

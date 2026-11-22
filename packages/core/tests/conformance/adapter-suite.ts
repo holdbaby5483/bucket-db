@@ -30,7 +30,7 @@ async function listAll(adapter: StorageAdapter, prefix: string) {
 }
 
 /**
- * The storage contract every backend must meet (M1A_PLAN §7 A and B).
+ * The storage contract every backend must meet (cases A1–A8 and B1–B5; docs/GUARANTEES.md maps them to guarantees).
  * Conditional-write cases run according to the backend's declared capabilities.
  */
 export function defineAdapterSuite(
