@@ -12,15 +12,18 @@ permissions:
 
 env:
   BUN_VERSION: 1.4.2
-  OSS_REGION: ${{ secrets.OSS_REGION }}
-  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-  BUCKET_DB_URL: oss://${{ secrets.OSS_BUCKET }}/ci/bucket-db
 
 jobs:
   record:
     name: Record benchmarks (${{ matrix.runtime }})
     runs-on: ubuntu-latest
+    # the OSS credentials are secrets of this environment
+    environment: bucket-db
+    env:
+      OSS_REGION: ${{ secrets.OSS_REGION }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      BUCKET_DB_URL: oss://${{ secrets.OSS_BUCKET }}/ci/bucket-db
     strategy:
       matrix:
         include:
@@ -67,6 +70,12 @@ jobs:
     name: Every job's record is visible
     needs: record
     runs-on: ubuntu-latest
+    environment: bucket-db
+    env:
+      OSS_REGION: ${{ secrets.OSS_REGION }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      BUCKET_DB_URL: oss://${{ secrets.OSS_BUCKET }}/ci/bucket-db
 
     steps:
       - uses: actions/checkout@v4
