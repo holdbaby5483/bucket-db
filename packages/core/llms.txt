@@ -1,15 +1,16 @@
 # BucketDB
 
-TypeScript document database (version 0.5.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 20 or Bun. Includes the `bucket-db` CLI.
+TypeScript document database (version 0.6.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 22 or Bun. Includes the `bucket-db` CLI.
 
 ## Key concepts
 
 - `BucketDB` — `BucketDB.connect(url?, { logger? })` (url default: env BUCKET_DB_URL) or `new BucketDB(adapter, dbPath, { logger? })`; `dbPath` is a key prefix (`''` = bucket root, may contain `/`)
 - Connection URLs: `s3://bucket/prefix?region=&endpoint=&forcePathStyle=&timeoutMs=`, `oss://bucket/prefix?region=&endpoint=&timeoutMs=`, `file:///abs/dir` or `file://./rel/dir` (dbPath ''), `memory://prefix`. Path = dbPath. Unknown query parameters → ValidationError. Credentials never in the URL (`user:secret@` is refused); they come from env (AWS_* / OSS_* / ALIBABA_CLOUD_*). Error messages never repeat the URL, so it is safe to log. URL-encode `endpoint` values.
-- `Collection<T>` — typed collection, returned by `db.collection<T>(name)` (same instance per name)
+- `Collection<T>` — typed collection, returned by `db.collection<T>(name)` (same instance per name). Exported as a type only: there is no `new Collection(...)` and no `CollectionOptions` (0.6); set the logger on BucketDB.
 - Storage: one JSON object per document at `<dbPath>/<collection>/docs/<id>.json`. No index, no log, no result cache. Format unchanged since 0.4.
 - Query snapshot (S3 / OSS / custom adapters with `remote: true` only): `<dbPath>/<collection>/_snapshot.v1.json` = `{ format: 'bucket-db-snapshot', version: 1, documents: { <id>: { etag, body } } }`. find LISTs docs/, uses a snapshot entry only if its etag equals the listed etag, GETs the rest (16 in parallel). The LIST is the authority: a missing/corrupt/stale/overwritten snapshot only costs speed, never changes results. Rewritten (unconditional PUT) when > 16 documents had to be read individually (+ entries of deleted docs). Memory / FileSystem keep no snapshot.
 - Every document extends `Document`: `id` (generated UUID unless chosen, taken from the object key), `_etag` (from storage, not stored in the body), `_createdAt`, `_updatedAt`
+- Returned documents are `Stored<T>` = `T & { _etag: string }`: `_etag` always set (no `!` needed); `_createdAt` / `_updatedAt` stay optional (hand-placed files may lack them)
 - `InsertDocument<T>` and `UpdateDocument<T>` exclude `id`, `_etag`, `_createdAt`, `_updatedAt` (UpdateDocument is also Partial); system fields passed at runtime are dropped
 - put vs insert: `put(id, data)` creates or replaces the whole document (unconditional, idempotent, resets `_createdAt`); `insert(data, { id })` creates only if the id is free, else DocumentExistsError; `insert(data)` generates a UUID.
 - Optimistic locking: `update(id, data, { etag: doc._etag })`; stale etag or lost race throws ConcurrentUpdateError (no retry). Works on Memory, S3, and FileSystem within one process. On OSS, update with etag throws UnsupportedError.
@@ -26,7 +27,7 @@ TypeScript document database (version 0.5.0). Uses AWS S3 / Alibaba Cloud OSS / 
 
 Multiple writer processes are supported for insert/put/delete on every backend and for update on S3 (Memory/FileSystem: within one process). put is last-writer-wins everywhere.
 
-## Limitations (0.5.0)
+## Limitations (0.6.0)
 
 - No transactions; each write touches one document. deleteMany is not atomic (one DELETE per match, 16 in parallel; a failure leaves earlier deletes done).
 - Envelope: at most 10,000 documents and 10 MB of snapshot per collection; past it the collection logs one `warn` and queries keep getting slower. Measured warm find at 10,000 docs: OSS 1.35 s, S3 3.2 s, FileSystem ~0.5 s; no snapshot at 10,000 docs: OSS 34 s, S3 134 s (docs/BENCHMARKS.md).
@@ -36,15 +37,16 @@ Multiple writer processes are supported for insert/put/delete on every backend a
 - Deleted documents' contents remain in the snapshot until it is rewritten or `compact()` runs.
 - OSS: no conditional update (etag → UnsupportedError); concurrent etag-less updates are last-writer-wins.
 - FileSystem: etag checks / concurrent update merging hold only within one process.
-- 0.3.x and 0.4+ clients must not write the same collection concurrently. 0.4+ reads 0.3 data as-is; it reads only `docs/` and `_snapshot.v1.json` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted. 0.4 and 0.5 share the format.
+- 0.3.x and 0.4+ clients must not write the same collection concurrently. 0.4+ reads 0.3 data as-is; it reads only `docs/` and `_snapshot.v1.json` and skips 0.3's `*.meta` files, so 0.3's index and log directories can be deleted. 0.4, 0.5 and 0.6 share the format.
+- Proxies: the S3/OSS client uses the runtime's built-in fetch. Bun (1.4.2) honours HTTPS_PROXY by default. Node (22.23.5, 24.22.3) ignores HTTP_PROXY / HTTPS_PROXY by default and connects directly; set NODE_USE_ENV_PROXY=1 (Node 22.21.0+ / 24.0.0+) or `--use-env-proxy` (22.21.0+ / 24.5.0+; Node marks it Stability 1.1, active development), e.g. `NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items`. NO_PROXY handling is untested.
 
 ## Package: @hold-baby/bucket-db
 
 ### Exports
 
-Classes: BucketDB, Collection, MemoryStorageAdapter, FileSystemAdapter, S3Adapter, OSSAdapter
+Classes: BucketDB, MemoryStorageAdapter, FileSystemAdapter, S3Adapter, OSSAdapter
 Errors: BucketDBError, ValidationError, DocumentNotFoundError, DocumentExistsError, ConcurrentUpdateError, UnsupportedError, StorageError
-Types: BucketDBOptions, CollectionOptions, Logger, LogEvent, Document, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, InsertOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
+Types: Collection (type only), BucketDBOptions, Logger, LogEvent, Document, Stored, InsertDocument, UpdateDocument, QueryOperator, QueryValue, QueryFilter, QueryOptions, SortSpec, InsertOptions, UpdateOptions, FileSystemAdapterConfig, S3AdapterOptions, OSSAdapterOptions, Credentials, CredentialProvider, StorageAdapter, Capabilities, Guarantee, WriteCondition, ObjectEntry, ListPage, ListOptions, StorageErrorKind, StorageErrorOptions
 
 ### BucketDB API
 
@@ -57,12 +59,12 @@ db.collection<T extends Document>(name: string): Collection<T>
 ### Collection API
 
 ```
-insert(data: InsertDocument<T>, options?: InsertOptions): Promise<T>  // 1 conditional PUT; generated UUID, or options.id (DocumentExistsError if taken)
-put(id: string, data: InsertDocument<T>): Promise<T>        // 1 unconditional PUT; create or replace whole doc; idempotent; resets _createdAt
-findById(id: string): Promise<T | null>                     // 1 GET; null ONLY if missing, other storage errors throw
-find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>   // LIST + snapshot (S3/OSS) or GET all (local); default order _createdAt then id
+insert(data: InsertDocument<T>, options?: InsertOptions): Promise<Stored<T>>  // 1 conditional PUT; generated UUID, or options.id (DocumentExistsError if taken)
+put(id: string, data: InsertDocument<T>): Promise<Stored<T>>        // 1 unconditional PUT; create or replace whole doc; idempotent; resets _createdAt
+findById(id: string): Promise<Stored<T> | null>                     // 1 GET; null ONLY if missing, other storage errors throw
+find(filter?: QueryFilter<T>, options?: QueryOptions<T>): Promise<Stored<T>[]>   // LIST + snapshot (S3/OSS) or GET all (local); default order _createdAt then id
 count(filter?: QueryFilter<T>): Promise<number>             // no filter: LIST only; with filter: like find
-update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>   // GET + conditional PUT
+update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<Stored<T>>   // GET + conditional PUT
 delete(id: string): Promise<void>                           // 1 DELETE; no error if missing
 deleteMany(filter: QueryFilter<T>): Promise<number>         // find + 1 DELETE per match (16 parallel); NOT atomic; returns count
 compact(): Promise<void>                                    // S3/OSS: rebuild the snapshot (LIST + GET all + PUT), drops deleted docs' contents; throws on failure; no-op locally
@@ -77,15 +79,16 @@ LogEvent = { level: 'warn' | 'error', message: string, error?: unknown }
 
 Receives: snapshot write failures (error), unparsable snapshot being rebuilt (warn), envelope exceeded (warn, once per collection).
 
-### QueryOptions / InsertOptions / UpdateOptions
+### QueryOptions<T> / InsertOptions / UpdateOptions
 
 ```
-{ sort?: Record<string, 1 | -1>, limit?: number, offset?: number }   // filter → sort → offset/limit, in memory
+{ sort?: SortSpec<T>, limit?: number, offset?: number }   // filter → sort → offset/limit, in memory
+SortSpec<T> = Partial<Record<keyof T | 'id' | '_etag' | '_createdAt' | '_updatedAt', 1 | -1>>   // unknown sort field = compile error; a field set to undefined is ignored
 { id?: string }
 { etag?: string }
 ```
 
-Order: default `_createdAt` asc then `id` asc (stable pagination); with sort, ties fall back to `_createdAt`, `id`. Missing/null values sort last in either direction. Mixed types: booleans < numbers < strings < others (JSON text). `limit: 0` → []. Negative/fractional limit/offset, sort direction not 1/-1, reserved sort field → ValidationError before any request.
+Order: default `_createdAt` asc then `id` asc (stable pagination); with sort, ties fall back to `_createdAt`, `id`. Missing/null values sort last in either direction. Mixed types: booleans < numbers < strings < others (JSON text). `limit: 0` → []. Negative/fractional limit/offset, sort direction not 1/-1 (undefined is ignored), reserved sort field → ValidationError before any request.
 
 ### Query operators
 

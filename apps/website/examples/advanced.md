@@ -113,7 +113,7 @@ import type { Collection, UpdateDocument } from '@hold-baby/bucket-db';
 ## 分页模式
 
 ::: tip 分页成本
-`offset` / `limit` / `sort` 在读取并过滤之后才在内存中应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，分页顺序稳定，大致等于插入顺序；需要其他顺序时传 `sort`，如 `{ sort: { createdAt: -1 } }`。`count()` 不带过滤条件时只列举集合（每 1000 个文档一次 LIST），带过滤条件时成本与 `find` 相同。每个集合的容量范围为 10,000 个文档、10 MB 快照。
+`offset` / `limit` / `sort` 在读取并过滤之后才在内存中应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，分页顺序稳定，大致等于插入顺序；需要其他顺序时传 `sort`，如 `{ sort: { _createdAt: -1 } }`。`count()` 不带过滤条件时只列举集合（每 1000 个文档一次 LIST），带过滤条件时成本与 `find` 相同。每个集合的容量范围为 10,000 个文档、10 MB 快照。
 :::
 
 ### 基础分页

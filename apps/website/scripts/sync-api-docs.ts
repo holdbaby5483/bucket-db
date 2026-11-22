@@ -102,7 +102,7 @@ function splitSections(content: string): Map<string, string> {
 function generateIndexPage(sections: Map<string, string>) {
   const content = `# API 参考
 
-BucketDB 0.5.0 完整的 API 文档。从 0.4 或 0.3.x 升级请先阅读[升级指南](/guide/migration)(涵盖 0.4 → 0.5 与 0.3 → 0.4);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 \`bucket-db\` 见[命令行(CLI)](/guide/cli)。
+BucketDB 0.6.0 完整的 API 文档,需要 Node.js 22+ 或 Bun。从 0.5、0.4 或 0.3.x 升级请先阅读[升级指南](/guide/migration)(涵盖 0.5 → 0.6、0.4 → 0.5 与 0.3 → 0.4);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 \`bucket-db\` 见[命令行(CLI)](/guide/cli)。
 
 ## 快速导航
 
@@ -156,7 +156,7 @@ const collection = db.collection<T>(name);
 
 ### Collection
 
-集合类,提供 CRUD 操作。每个文档是一个对象:\`<dbPath>/<collection>/docs/<id>.json\`;S3 / OSS 上每个集合还有一个可丢弃的查询快照 \`<dbPath>/<collection>/_snapshot.v1.json\`。
+集合类,提供 CRUD 操作,只能通过 \`db.collection<T>(name)\` 获取;\`Collection\` 只导出类型(\`import type { Collection }\`),没有公开的构造函数。返回的文档类型为 \`Stored<T>\`(\`_etag\` 一定有值)。每个文档是一个对象:\`<dbPath>/<collection>/docs/<id>.json\`;S3 / OSS 上每个集合还有一个可丢弃的查询快照 \`<dbPath>/<collection>/_snapshot.v1.json\`。
 
 \`\`\`typescript
 await collection.insert(data);              // 1 次条件 PUT
@@ -214,12 +214,15 @@ S3 与 OSS 每个请求最多尝试 3 次,单次超时默认 10 秒,重试网络
 BucketDB 提供完整的 TypeScript 类型:
 
 - \`Document\` - 文档基础类型
+- \`Stored<T>\` - 集合返回的文档类型,\`T & { _etag: string }\`
 - \`QueryFilter<T>\` - 查询过滤器
 - \`InsertDocument<T>\` - 插入文档类型
 - \`UpdateDocument<T>\` - 更新文档类型
 - \`InsertOptions\` - \`insert\` 选项(\`{ id }\`)
-- \`QueryOptions\` - \`find\` 选项(\`limit\` / \`offset\` / \`sort\`)
+- \`QueryOptions<T>\` - \`find\` 选项(\`limit\` / \`offset\` / \`sort\`)
+- \`SortSpec<T>\` - \`sort\` 的类型:\`T\` 的字段加系统字段,未知字段编译报错
 - \`BucketDBOptions\` / \`Logger\` / \`LogEvent\` - 日志回调
+- \`Collection<T>\` - 集合类型(只导出类型)
 
 详见 [类型定义](./types)。
 

@@ -46,8 +46,8 @@ features:
     details: 通过 dbPath 参数实现多环境、多租户的数据隔离
 ---
 
-::: tip 0.5.0
-0.5.0 新增:用一个连接字符串打开数据库(`BucketDB.connect()` / `BUCKET_DB_URL`);`put` 按已知 ID 创建或替换;`insert` 可指定 ID(已存在时抛出 `DocumentExistsError`);`find` 支持 `sort`,新增 `count` 与 `deleteMany`;随包附带命令行工具 `npx @hold-baby/bucket-db`,见[命令行](/guide/cli)和[在 CI 中使用](/guide/ci)。查询语义和默认顺序有不兼容变化,从 0.4 升级请先阅读[升级指南](/guide/migration)。
+::: tip 0.6.0
+0.6.0 是 1.0 之前最后一个包含不兼容变更的版本,只收紧公开类型:`Collection` 只导出类型(集合只能通过 `db.collection(name)` 获取,`CollectionOptions` 不再导出);`insert` / `put` / `findById` / `find` / `update` 返回 `Stored<T>`,`_etag` 一定有值;`sort` 的字段做类型检查(`SortSpec<T>`);要求 Node.js 22+ 或 Bun。存储格式、命令行和运行时行为不变。从 0.5 升级请阅读[升级指南](/guide/migration)。
 :::
 
 ## 快速示例
@@ -93,7 +93,7 @@ await users.delete(user.id);
 - **云原生** - 已使用云对象存储,希望简化架构、不运维数据库
 - **类型安全** - TypeScript 项目,需要完整类型支持
 
-### ⚠️ 当前限制(0.5.0)
+### ⚠️ 当前限制(0.6.0)
 
 - **没有事务** - 每次写入只涉及一个文档。
 - **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照;超出后查询仍可用但更慢,并记录一次警告。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。

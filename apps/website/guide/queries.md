@@ -201,6 +201,7 @@ const users = await collection.find(
 );
 ```
 
+- `sort` 的类型是 `SortSpec<T>`：键只能是文档类型 `T` 的字段以及 `id`、`_etag`、`_createdAt`、`_updatedAt`，拼错或未声明的字段在编译时报错（0.6 起）。单独声明选项时写 `QueryOptions<User>`。值为 `undefined` 的字段会被忽略。
 - 不传 `sort` 时按 `_createdAt` 升序、再按 `id` 升序，大致是插入顺序。
 - 给定字段都相同时，回退到 `_createdAt`、`id`（升序），除非这两个字段已出现在 `sort` 中。
 - 字段缺失或为 `null` 的文档无论升序还是降序都排在最后；没有 `_createdAt` 的文档（由其他工具写入）在默认顺序中排在最后。

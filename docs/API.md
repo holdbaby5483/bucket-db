@@ -1,6 +1,6 @@
 # BucketDB API Reference
 
-Complete API documentation for BucketDB v0.5.0. Upgrading from 0.4: see [MIGRATION-0.5.md](./MIGRATION-0.5.md); from 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md). The `bucket-db` command line tool is described in [CLI.md](./CLI.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
+Complete API documentation for BucketDB v0.6.0. Requires Node.js >= 22 or Bun. Upgrading from 0.5: see [MIGRATION-0.6.md](./MIGRATION-0.6.md); from 0.4: [MIGRATION-0.5.md](./MIGRATION-0.5.md); from 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md). The `bucket-db` command line tool is described in [CLI.md](./CLI.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
 
 ## Table of Contents
 
@@ -155,11 +155,13 @@ Type-safe collection for CRUD operations. Each document is stored as `<dbPath>/<
 
 Document IDs passed to `insert` (as `options.id`), `put`, `findById`, `update` and `delete` follow the same rules as collection names; an invalid ID rejects with `ValidationError`.
 
-Get collections through `db.collection(name)`. The class is also exported; its constructor is `new Collection<T>(adapter, dbPath, name, options?: CollectionOptions)` with `CollectionOptions = { logger?: Logger }`, the same option `BucketDB` passes on.
+Get collections through `db.collection(name)`; there is no public constructor. `Collection` is exported as a type only, for annotations such as `const users: Collection<User> = db.collection<User>('users')`. The logger is set on the `BucketDB` ([`BucketDBOptions`](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md#bucketdboptions)) and applies to all of its collections.
+
+Every method that returns documents returns [`Stored<T>`](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md#storedt): `T` with `_etag: string` always set.
 
 #### Methods
 
-##### `insert(data: InsertDocument<T>, options?: InsertOptions): Promise<T>`
+##### `insert(data: InsertDocument<T>, options?: InsertOptions): Promise<Stored<T>>`
 
 Create a new document. One conditional PUT (create-if-absent).
 
@@ -167,7 +169,7 @@ Create a new document. One conditional PUT (create-if-absent).
 - `data` - Document data. `id`, `_etag`, `_createdAt` and `_updatedAt` are excluded by the type and dropped at runtime.
 - `options.id?: string` - Use this ID instead of a generated UUID. The document is created only if no document has that ID; of several concurrent inserts with the same ID exactly one succeeds.
 
-**Returns:** Complete document with system fields. `_createdAt` and `_updatedAt` are the current time.
+**Returns:** Complete document with system fields: `id`, `_etag`, and `_createdAt` and `_updatedAt` set to the current time.
 
 **Throws:**
 - `DocumentExistsError` - `options.id` is already taken
@@ -191,7 +193,7 @@ try {
 }
 ```
 
-##### `put(id: string, data: InsertDocument<T>): Promise<T>`
+##### `put(id: string, data: InsertDocument<T>): Promise<Stored<T>>`
 
 Create or replace the whole document under `id`. One unconditional PUT; the old document is not read. Repeating the same `put` is harmless, which makes it the write to use for records keyed by something you already know (a CI run, a commit, a date) and may write twice.
 
@@ -213,7 +215,7 @@ No write condition is used, so `put` behaves the same on every backend, OSS incl
 await runs.put(`${process.env.GITHUB_RUN_ID}-${shard}`, { sha, shard, durationMs });
 ```
 
-##### `findById(id: string): Promise<T | null>`
+##### `findById(id: string): Promise<Stored<T> | null>`
 
 Find a document by ID. One GET.
 
@@ -234,14 +236,14 @@ if (user) {
 }
 ```
 
-##### `find(filter?: QueryFilter<T>, options?: QueryOptions): Promise<T[]>`
+##### `find(filter?: QueryFilter<T>, options?: QueryOptions<T>): Promise<Stored<T>[]>`
 
 Query documents with a filter.
 
 **Parameters:**
 - `filter` - Query filter object (default `{}`, all documents). Semantics: [Query Operators](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md#query-operators).
 - `options` - Query options
-  - `sort?: Record<string, 1 | -1>` - Fields to sort by, most significant first: `1` ascending, `-1` descending
+  - `sort?: SortSpec<T>` - Fields to sort by, most significant first: `1` ascending, `-1` descending. Keys are the fields of `T` plus `id`, `_etag`, `_createdAt` and `_updatedAt`; any other key is a compile error. A field set to `undefined` is ignored.
   - `limit?: number` - Maximum number of results; `0` returns `[]`
   - `offset?: number` - Number of matching results to skip
 
@@ -301,7 +303,7 @@ const total = await users.count();
 const active = await users.count({ status: 'active' });
 ```
 
-##### `update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<T>`
+##### `update(id: string, data: UpdateDocument<T>, options?: UpdateOptions): Promise<Stored<T>>`
 
 Merge `data` into the stored document. GET, then a conditional PUT. `_updatedAt` is set to the current time; `id`, `_etag`, `_createdAt` and `_updatedAt` in `data` are excluded by the type and dropped at runtime.
 
@@ -316,7 +318,7 @@ Merge `data` into the stored document. GET, then a conditional PUT. `_updatedAt`
 - **Without `etag`**, on backends with compare-and-swap (Memory, FileSystem within one process, S3): a PUT that collides with another writer re-reads the document and retries, up to 5 retries with jittered backoff, so concurrent partial updates all apply. After that it throws `ConcurrentUpdateError`.
 - **Without `etag` on OSS**: plain PUT; the last writer wins.
 
-**Returns:** Updated document
+**Returns:** The updated document, with its new `_etag`
 
 **Throws:**
 - `DocumentNotFoundError` - Document does not exist
@@ -665,7 +667,17 @@ interface Document {
 }
 ```
 
-All collection documents must extend this interface. `id` comes from the object key and `_etag` from the storage service; neither is stored in the document body.
+All collection documents must extend this interface. `id` comes from the object key and `_etag` from the storage service; neither is stored in the document body. Documents returned by a collection have the type `Stored<T>`, in which `_etag` is always set.
+
+### Stored<T>
+
+A document as returned by `insert`, `put`, `findById`, `find` and `update`.
+
+```typescript
+type Stored<T extends Document> = T & { _etag: string };
+```
+
+`_etag` is always set, so it can be passed to `update(id, data, { etag: doc._etag })` without a non-null assertion. `_createdAt` and `_updatedAt` stay optional: a file placed in `docs/` by other means may lack them.
 
 ### InsertDocument<T>
 
@@ -718,12 +730,12 @@ type QueryValue<T> =
 type QueryOperator = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin';
 ```
 
-### QueryOptions
+### QueryOptions<T>
 
-Sorting and pagination for `find`.
+Sorting and pagination for `find`. `T` defaults to `Document`; `find` on a `Collection<T>` takes `QueryOptions<T>`.
 
 ```typescript
-interface QueryOptions {
+interface QueryOptions<T = Document> {
   /** 0 returns no documents. Default: all. */
   limit?: number;
   offset?: number;
@@ -731,11 +743,21 @@ interface QueryOptions {
    * Fields to sort by, in order: 1 ascending, -1 descending. Missing values sort
    * last. Ties, and the default order, are `_createdAt` then `id`.
    */
-  sort?: Record<string, 1 | -1>;
+  sort?: SortSpec<T>;
 }
 ```
 
 `limit` and `offset` must be non-negative integers. See `find` for the ordering rules.
+
+### SortSpec<T>
+
+The `sort` option of `find`.
+
+```typescript
+type SortSpec<T> = Partial<Record<(keyof T & string) | 'id' | '_etag' | '_createdAt' | '_updatedAt', 1 | -1>>;
+```
+
+Keys are the document's fields plus the system fields, so a misspelt field is a compile error. At runtime, a field whose direction is `undefined` is ignored, and any other value than `1` / `-1` throws `ValidationError`.
 
 ### InsertOptions
 
@@ -757,20 +779,16 @@ interface UpdateOptions {
 }
 ```
 
-### BucketDBOptions / CollectionOptions
+### BucketDBOptions
 
 ```typescript
 interface BucketDBOptions {
   /** Receives snapshot write failures and envelope warnings. Default: console.warn. */
   logger?: Logger;
 }
-
-interface CollectionOptions {
-  logger?: Logger;
-}
 ```
 
-`BucketDBOptions` is the third argument of `new BucketDB`; `BucketDB` passes its `logger` to every collection as `CollectionOptions`.
+`BucketDBOptions` is the last argument of `new BucketDB(adapter, dbPath, options)` and `BucketDB.connect(url, options)`; the `logger` applies to every collection of that `BucketDB`.
 
 ### Logger / LogEvent
 
@@ -1110,6 +1128,10 @@ On remote backends (`S3Adapter`, `OSSAdapter`, custom adapters with `remote: tru
 ---
 
 ## Migration Guide
+
+### From 0.5
+
+See [MIGRATION-0.6.md](./MIGRATION-0.6.md): `Collection` is a type only (no `new Collection`, no `CollectionOptions`), returned documents are `Stored<T>`, `sort` keys are type-checked, and Node.js 22 or later is required. The storage format and runtime behaviour did not change.
 
 ### From 0.4
 

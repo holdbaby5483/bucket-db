@@ -1,6 +1,6 @@
 # CLI Reference
 
-`bucket-db` reads and writes BucketDB collections from a shell or a CI job. It ships with `@hold-baby/bucket-db` (0.5.0 and later) and needs Node.js >= 20 or Bun.
+`bucket-db` reads and writes BucketDB collections from a shell or a CI job. It ships with `@hold-baby/bucket-db` (0.5.0 and later) and needs Node.js >= 22 or Bun.
 
 ```bash
 npx @hold-baby/bucket-db <command> [arguments] [--url <url>]
@@ -30,6 +30,19 @@ The database comes from `--url <url>`, or from the `BUCKET_DB_URL` environment v
 - A URL with credentials in it (`s3://KEY:SECRET@bucket`) is refused. Error messages never repeat the URL, so `BUCKET_DB_URL` is safe to print in logs.
 
 The same URLs work in code through [`BucketDB.connect`](./API.md#static-connecturl-string-options-bucketdboptions-bucketdb).
+
+### Proxies
+
+The CLI reaches S3 / OSS through the runtime's built-in `fetch`, so whether it uses a proxy depends on the runtime. Measured against real S3 through a CONNECT proxy:
+
+- **Bun** (1.4.2) honours `HTTPS_PROXY` by default.
+- **Node** (22.23.5, 24.22.3) ignores `HTTP_PROXY` / `HTTPS_PROXY` by default and connects directly, even when the configured proxy is unreachable. With `NODE_USE_ENV_PROXY=1` (Node 22.21.0+ / 24.0.0+), or the flag `--use-env-proxy` (Node 22.21.0+ / 24.5.0+), requests go through the proxy. Node marks this "Stability 1.1 – Active development".
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
+```
+
+`NO_PROXY` handling has not been tested.
 
 ## Commands
 

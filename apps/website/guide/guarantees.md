@@ -1,6 +1,6 @@
 # 保证与限制
 
-适用于 0.5.0。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
+适用于 0.6.0。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
 
 ## 各后端
 
@@ -47,6 +47,17 @@
 | 混合类型按 boolean < number < string 排序 | "mixed types order as booleans < numbers < strings" |
 | 非法的排序方向或字段抛 `ValidationError` | "an invalid direction or field is a ValidationError" |
 
+## 公开 API 类型
+
+[`packages/core/tests/types/public-api.ts`](https://github.com/holdbaby5483/bucket-db/blob/main/packages/core/tests/types/public-api.ts)，只编译、不运行，由 `bun run --cwd packages/core typecheck`（`tsc -p tests/types`）在每次 push 和 pull request 时检查。标注了 `@ts-expect-error` 的行如果不再报错，检查就会失败。
+
+| 保证 | 检查方式 |
+|---|---|
+| `insert`、`findById`、`find`、`update` 返回 `Stored<T>`：`_etag` 是 `string`，可直接作为 `update` 的 `etag`，无需 `!` | `packages/core/tests/types/public-api.ts`，"Returned documents always carry an etag" |
+| `sort` 接受文档字段以及 `id`、`_etag`、`_createdAt`、`_updatedAt`；未知字段或 `1` / `-1` 以外的方向无法编译 | `packages/core/tests/types/public-api.ts`，"Sort keys are the document's fields plus the system fields" |
+| `insert` 和 `update` 的数据不能包含 `id` 或 `_createdAt` | `packages/core/tests/types/public-api.ts`，"insert / put / update accept no system fields" |
+| `Collection` 只导出类型；`new Collection()` 无法编译 | `packages/core/tests/types/public-api.ts`，"Collection is exported as a type only" |
+
 ## 连接 URL
 
 `core/connect.test.ts` 中的 "connection URLs"：
@@ -61,7 +72,7 @@
 
 ## 命令行
 
-`core/cli.test.ts` 中的 "bucket-db CLI"，以子进程运行 `src/cli.ts`；CI 的 Node 任务还会在 Node 20 和 22 上运行构建后的 CLI（`put`、`count`、`export | import`、`get`、`doctor`、退出码 2）。
+`core/cli.test.ts` 中的 "bucket-db CLI"，以子进程运行 `src/cli.ts`；CI 的 Node 任务还会在 Node 22 和 24 上运行构建后的 CLI（`put`、`count`、`export | import`、`get`、`doctor`、退出码 2）。
 
 | 保证 | 测试 |
 |---|---|
@@ -135,6 +146,7 @@
 - **OSS 不支持条件更新。** 带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。在开启版本控制的 OSS bucket 上，不存在才创建也不生效。
 - **FileSystem 的条件更新仅限单进程。** `etag` 检查和并发 `update` 的合并只在同一进程的写入者之间有效。
 - **结果不是某一时刻的快照。** 见上面的一致性级别。
-- **0.3.x 与 0.4 及以后的版本不能同时写入同一集合。** 0.3 只读取自己的索引，看不到后续版本的写入。0.4 与 0.5 写入格式和写入代码路径相同，可以共用一个集合；这一点来自代码层面的判断，没有测试覆盖。
+- **0.3.x 与 0.4 及以后的版本不能同时写入同一集合。** 0.3 只读取自己的索引，看不到后续版本的写入。0.4、0.5 与 0.6 写入格式和写入代码路径相同，可以共用一个集合；这一点来自代码层面的判断，没有测试覆盖。
 - **云服务中只测试了 AWS S3 和阿里云 OSS。** 其他 S3 兼容服务可以通过 `endpoint` 尝试使用；CI 中用 SeaweedFS 作为本地替代。
 - **OSS 上 LIST 的写后读一致性是观察结果，而非承诺。** AWS 文档承诺 LIST 强一致；对 OSS，storage contract A7 持续在真实服务上检查。
+- **是否走代理取决于运行时。** S3 / OSS 客户端使用内置的 `fetch`。通过 CONNECT 代理访问真实 S3 实测：Bun 1.4.2 默认遵循 `HTTPS_PROXY`；Node 22.23.5 和 24.22.3 忽略 `HTTP_PROXY` / `HTTPS_PROXY` 并直接连接，除非设置 `NODE_USE_ENV_PROXY=1`（Node 22.21.0+ / 24.0.0+）或使用 `--use-env-proxy`（22.21.0+ / 24.5.0+），Node 将其标记为 "Stability 1.1 – Active development"。这是手动检查，CI 中没有测试；`NO_PROXY` 的处理尚未测试。见[命令行 · 代理](/guide/cli#代理)。

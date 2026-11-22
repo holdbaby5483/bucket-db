@@ -2,7 +2,7 @@
 
 使用 `S3Adapter` 和 `OSSAdapter` 把数据存到对象存储。
 
-BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何运行时依赖，需要 Node >= 20 或 Bun。`S3Adapter` 通过 `endpoint` 可以连接任何兼容 S3 的服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。
+BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何运行时依赖，需要 Node >= 22 或 Bun。`S3Adapter` 通过 `endpoint` 可以连接任何兼容 S3 的服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。需要经过 HTTP 代理访问存储时，Node 默认忽略 `HTTPS_PROXY`，需设置 `NODE_USE_ENV_PROXY=1`，见[安装指南 · 代理](/guide/installation#代理)。
 
 ::: warning 使用前请阅读
 - OSS 不支持条件更新：带 `etag` 的 `update` 会抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。需要乐观锁请使用 S3。

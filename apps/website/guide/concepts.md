@@ -97,6 +97,8 @@ type UpdateDocument<T extends Document> = Partial<Omit<T, 'id' | '_etag' | '_cre
 
 读取文档时，`id` 取自对象 key，`_etag` 取自存储返回的 ETag（`_etag` 不保存在文档内容中），与文档 JSON 中写了什么无关。
 
+集合返回的文档（`insert`、`put`、`findById`、`find`、`update` 的结果）类型为 `Stored<T>` = `T & { _etag: string }`：`_etag` 一定有值，可以直接传给 `update` 的 `etag`，不需要 `!`。`_createdAt` / `_updatedAt` 仍是可选的，因为手工放进 `docs/` 的文件可能没有这两个字段。
+
 ## 存储适配器（StorageAdapter）
 
 存储适配器是对底层存储的抽象，提供统一的 API。
@@ -287,7 +289,7 @@ async function incrementAge(id: string) {
 
 详见[保证与限制](./guarantees)（每条保证都注明了对应的测试）。
 
-当前版本（0.5.0）的其他限制：
+当前版本（0.6.0）的其他限制：
 
 1. **没有事务** - 每次写入只涉及一个文档。
 2. **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。S3/OSS 上热 `find` 为 LIST + 1 次快照 GET + 变化文档的 GET；Memory/FileSystem 上每次 `find` 读取每个文件。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。

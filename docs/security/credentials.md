@@ -98,7 +98,7 @@ OSS_ACCESS_KEY_SECRET=your_secret_key
 
 **加载环境变量**：
 ```typescript
-// Node.js 20.6+：node --env-file=.env app.js
+// Node.js 22+：node --env-file=.env app.js
 // 或使用 dotenv
 import 'dotenv/config';
 

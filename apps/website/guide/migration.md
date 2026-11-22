@@ -1,5 +1,66 @@
 # 升级指南
 
+## 从 0.5 升级到 0.6
+
+0.6.0 是 1.0 之前最后一个包含不兼容变更的版本，只收紧公开类型并提高 Node.js 最低版本。**存储格式、命令行、连接字符串、MCP 服务器和运行时行为都没有变化**，0.5 和 0.6 可以读写同一个集合。完整说明见 [MIGRATION-0.6.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md)。
+
+```bash
+npm install @hold-baby/bucket-db@0.6.0
+```
+
+**受影响的代码**：调用 `new Collection(...)`、导入 `CollectionOptions` 或把 `Collection` 当作值使用（`instanceof`）的代码；按文档类型中未声明的字段排序的代码；运行在 Node.js 20 上的应用和 CI。只使用 `BucketDB`、`db.collection<T>(name)` 和带类型文档的代码无需修改。
+
+### `Collection` 只导出类型
+
+`Collection` 改为 `export type` 导出，只能用于类型标注，不能 `new`，也不能用于 `instanceof`。集合只能通过 `db.collection(name)` 获取。`CollectionOptions` 不再导出，`logger` 在 `BucketDB` 上设置，对它的所有集合生效。
+
+```typescript
+// 0.5
+import { Collection } from '@hold-baby/bucket-db';
+const users = new Collection<User>(adapter, 'my-app', 'users', { logger });
+
+// 0.6
+import { BucketDB } from '@hold-baby/bucket-db';
+import type { Collection } from '@hold-baby/bucket-db';
+const db = new BucketDB(adapter, 'my-app', { logger }); // 或 BucketDB.connect(url, { logger })
+const users: Collection<User> = db.collection<User>('users');
+```
+
+### 返回的文档类型为 `Stored<T>`
+
+`insert`、`put`、`findById`、`find`、`update` 返回 `Stored<T>` = `T & { _etag: string }`（新导出的类型）。`_etag` 一定有值，不再需要非空断言；`_createdAt` / `_updatedAt` 仍是可选的，因为手工放进 `docs/` 的文件可能没有。
+
+```typescript
+// 0.5
+if (user) await users.update(id, { age: 31 }, { etag: user._etag! });
+
+// 0.6
+if (user) await users.update(id, { age: 31 }, { etag: user._etag });
+```
+
+`Stored<T>` 可以赋给 `T`，原有的 `const user: User = await users.insert(...)` 照常编译。不再编译的是把普通的 `T` 放进需要 `Stored<T>` 的位置，例如向 `find` 返回的数组里 `push` 手工构造的对象；这类数组请标注为 `T[]`。
+
+### `sort` 的字段做类型检查
+
+`QueryOptions` 带上文档类型：`QueryOptions<T = Document>`，`sort` 的类型是 `SortSpec<T>`（新导出的类型），键只能是 `T` 的字段加上 `id`、`_etag`、`_createdAt`、`_updatedAt`，值为 `1` 或 `-1`。拼错或未声明的字段在编译时报错。
+
+```typescript
+// 0.5：能编译，但 createdAt 不是字段，所有文档都按"缺失"排序
+// 0.6：编译错误，应使用系统字段 _createdAt
+await users.find({}, { sort: { createdAt: -1 } });
+
+// 单独声明选项时带上文档类型
+const options: QueryOptions<User> = { sort: { age: -1 }, limit: 10 };
+```
+
+不带类型参数的 `db.collection('users')` 是 `Collection<Document>`，只能按系统字段排序；请声明文档类型 `db.collection<User>('users')`。
+
+运行时，值为 `undefined` 的 `sort` 字段现在被忽略（0.5 抛 `ValidationError`），所以可以写 `{ sort: { age: descending ? -1 : undefined } }`。`1` / `-1` 以外的其他值仍然抛错。
+
+### Node.js 22 及以上
+
+`engines.node` 改为 `>=22`，CI 测试 Node 22 和 24（以及 Bun）。Node 20 已于 2026-04-30 停止维护，不再测试；在 Node 20 上安装时 npm 会给出 `EBADENGINE` 警告（开启 `engine-strict` 时直接拒绝）。请同时升级应用、CI 任务以及运行 `npx @hold-baby/bucket-db` 的环境。
+
 ## 从 0.4 升级到 0.5
 
 0.5.0 新增了连接字符串（`BucketDB.connect()` / `BUCKET_DB_URL`）、`put`、带 `id` 的 `insert`、`sort`、`count`、`deleteMany` 和命令行工具（见[命令行](/guide/cli)）。**存储格式没有变化**，不需要转换数据。以下 4 项是不兼容变更，完整说明见 [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md)。
@@ -83,7 +144,7 @@ BUCKET_DB_URL=s3://my-bucket/app?region=us-east-1
 | OSS 带 `etag` 的 `update` | 非原子模拟 | 抛 `UnsupportedError` |
 | `UpdateDocument<T>` | 可包含 `_etag`、`_createdAt`、`_updatedAt` | 排除所有系统字段 |
 | `StorageAdapter` 接口 | `get/put/delete/exists/listKeys/batchGet` | `capabilities` + `get/put/delete/list`（字节、分页） |
-| 运行环境 | 未声明 | Node.js 20+ 或 Bun |
+| 运行环境 | 未声明 | Node.js 20+ 或 Bun（0.6 起需要 Node.js 22+） |
 
 ### 破坏性变更
 
@@ -251,7 +312,7 @@ import type { Credentials, S3AdapterOptions, OSSAdapterOptions } from '@hold-bab
 文档对象 `docs/<id>.json` 的格式没有变化，**不需要转换数据**，0.4 可以直接读取 0.3 的集合。
 
 1. **停止所有 0.3 写入进程**。0.3 只读取自己的索引，看不到 0.4 的写入；0.3 和 0.4 不能同时写入同一集合。
-2. 升级依赖到 `@hold-baby/bucket-db@0.4.0`（或直接升级到 0.5.0，并同时按上文“从 0.4 升级到 0.5”修改），按上文修改代码。
+2. 升级依赖到 `@hold-baby/bucket-db@0.4.0`（或直接升级到 0.6.0，并同时按上文“从 0.4 升级到 0.5”“从 0.5 升级到 0.6”修改），按上文修改代码。
 3. 启动 0.4 客户端。
 4. （可选）删除 0.3 遗留的 `index/`、`wal/` 目录和 `docs/*.meta` 文件。0.4 会忽略它们，删除只是为了节省存储空间。
 

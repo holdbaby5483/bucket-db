@@ -8,7 +8,7 @@ A TypeScript document database built on cloud object storage (AWS S3 / Alibaba C
 
 Each document is one JSON object in your bucket: `<dbPath>/<collection>/docs/<id>.json`. There is no index and no log; every write is a single storage request. On S3 and OSS, queries also keep a disposable snapshot, `<dbPath>/<collection>/_snapshot.v1.json`, so a query does not download every document ([storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md)).
 
-> **0.5.0** adds connection URLs (`BucketDB.connect`), the `bucket-db` CLI with `doctor`, `put`, `insert` with a chosen id, `sort`, `count` and `deleteMany`, and settles query semantics. Upgrading from 0.4? Read [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md); from 0.3.x, [MIGRATION-0.4.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md) first.
+> **0.6.0** is the last breaking release before 1.0 and settles the public types: `Collection` is a type only (get collections from `db.collection(name)`), returned documents are `Stored<T>` with `_etag` always set, `sort` keys are type-checked, and Node.js 22 is the minimum. Storage format, CLI and runtime behaviour are unchanged. Upgrading from 0.5? Read [MIGRATION-0.6.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md); from 0.4, [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) first; from 0.3.x, [MIGRATION-0.4.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md) before that.
 
 ## Status and limitations
 
@@ -42,7 +42,7 @@ bun add @hold-baby/bucket-db
 npm install @hold-baby/bucket-db
 ```
 
-Requires Node.js >= 20 or Bun. No runtime dependencies: the S3 / OSS client is built in.
+Requires Node.js >= 22 or Bun. No runtime dependencies: the S3 / OSS client is built in.
 
 ## Command line
 
@@ -82,8 +82,10 @@ Every query parameter is optional and falls back to the adapter's environment de
 ## Exports
 
 ```typescript
-// Core classes
-import { BucketDB, Collection } from '@hold-baby/bucket-db';
+// Core class
+import { BucketDB } from '@hold-baby/bucket-db';
+// Collection is a type only: get collections from db.collection(name)
+import type { Collection } from '@hold-baby/bucket-db';
 
 // Storage adapters
 import {
@@ -96,16 +98,17 @@ import {
 // Types
 import type {
   BucketDBOptions,
-  CollectionOptions,
   Logger,
   LogEvent,
   Document,
+  Stored,
   InsertDocument,
   UpdateDocument,
   QueryOperator,
   QueryValue,
   QueryFilter,
   QueryOptions,
+  SortSpec,
   InsertOptions,
   UpdateOptions,
   FileSystemAdapterConfig,
@@ -160,6 +163,8 @@ interface User extends Document {
 `InsertDocument<T>` and `UpdateDocument<T>` both omit `id`, `_etag`, `_createdAt` and `_updatedAt`; `UpdateDocument<T>` also makes every field optional. If system fields are passed at runtime anyway, `insert`, `put` and `update` drop them.
 
 `_etag` is not stored in the document body: on every read, `id` comes from the object key and `_etag` from the storage service.
+
+Every document a collection returns (`insert`, `put`, `findById`, `find`, `update`) has the type `Stored<T>` = `T & { _etag: string }`: `_etag` is always set, so it can be passed to `update` without `!`. `_createdAt` and `_updatedAt` stay optional, because a file placed in `docs/` by other means may lack them.
 
 ## Quick Start
 
@@ -226,7 +231,7 @@ await users.deleteMany({ status: 'inactive' });
 
 N = documents in the collection. Measured latencies at 100, 1,000 and 10,000 documents are in [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md).
 
-Without `sort`, `find` returns documents by `_createdAt`, then `id`: roughly creation order, and stable for paging. `sort: { field: 1 | -1 }` sorts by the given fields first; missing and `null` values sort last in either direction. `sort`, `offset` and `limit` apply after filtering, and `limit: 0` returns `[]`. There is no result cache: every `find` lists storage first.
+Without `sort`, `find` returns documents by `_createdAt`, then `id`: roughly creation order, and stable for paging. `sort: { field: 1 | -1 }` sorts by the given fields first; missing and `null` values sort last in either direction. Sort keys are typed as `SortSpec<T>`: the document's fields plus `id`, `_etag`, `_createdAt` and `_updatedAt`, so an unknown field is a compile error; a field set to `undefined` is ignored. `sort`, `offset` and `limit` apply after filtering, and `limit: 0` returns `[]`. There is no result cache: every `find` lists storage first.
 
 `put` replaces the whole document and sets both timestamps to now (so it moves to the end of the default order); `update` merges fields and keeps `_createdAt`. `insert` with `{ id }` creates only if the ID is free; of several concurrent inserts with one ID, exactly one succeeds.
 
@@ -472,12 +477,25 @@ The function's result is cached; it is called again 5 minutes before `expiresAt`
 
 `S3Adapter` and `OSSAdapter` make up to 3 attempts per request, with jittered exponential backoff, on network errors, timeouts, 5xx, 429, `SlowDown` and `RequestTimeout`. Other 4xx responses are not retried. A failure that persists becomes `StorageError` with `kind: 'transient'`. If a conditional write hits a conflict after a transient failure, the adapter reads the object back and compares it with what it wrote, so an earlier attempt that did succeed is not reported as a conflict.
 
+### Proxies
+
+The S3 / OSS client uses the runtime's built-in `fetch`, so proxy support is the runtime's. Measured against real S3 through a CONNECT proxy:
+
+- **Bun** (1.4.2) honours `HTTPS_PROXY` by default.
+- **Node** (22.23.5, 24.22.3) by default ignores `HTTP_PROXY` / `HTTPS_PROXY` and connects directly. Set `NODE_USE_ENV_PROXY=1` (Node 22.21.0+ / 24.0.0+) or pass `--use-env-proxy` (Node 22.21.0+ / 24.5.0+) to send requests through the proxy; Node marks this "Stability 1.1 – Active development".
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
+```
+
+`NO_PROXY` handling has not been tested.
+
 ## BucketDB
 
 ```typescript
 new BucketDB(adapter: StorageAdapter, dbPath: string, options?: BucketDBOptions)
 BucketDB.connect(url?: string, options?: BucketDBOptions): BucketDB // see Connection URLs; default BUCKET_DB_URL
-db.collection<T extends Document>(name: string): Collection<T>
+db.collection<T extends Document>(name: string): Collection<T> // Collection is exported as a type only
 
 interface BucketDBOptions {
   logger?: Logger; // default: console.warn
@@ -501,6 +519,8 @@ A custom `StorageAdapter` can set `readonly remote = true` to get the query snap
 
 ## Upgrading
 
+**From 0.5.** The storage format and runtime behaviour are unchanged; the types changed. `Collection` is a type only (`new Collection(...)` and `CollectionOptions` are gone; set the logger on `BucketDB`), returned documents are `Stored<T>`, `sort` keys must be fields of the document type or system fields, and Node.js 22 or later is required. Details: [MIGRATION-0.6.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md).
+
 **From 0.4.** The storage format is unchanged. Queries changed: `$ne` / `$nin` now match documents without the field, range comparisons between mismatched types no longer throw, `find` without `sort` orders by `_createdAt` then `id`, and `limit: 0` returns `[]`. The MCP server is configured by `BUCKET_DB_URL`. Details: [MIGRATION-0.5.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md).
 
 **From 0.3.x.**
@@ -516,7 +536,7 @@ A custom `StorageAdapter` can set `readonly remote = true` to get the query snap
 - [Guarantees and limits](https://github.com/holdbaby5483/bucket-db/blob/main/docs/GUARANTEES.md): what each backend guarantees and the test that checks it
 - [Storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md): the keys and JSON BucketDB writes
 - [Benchmarks](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md): requests and latency at 100 to 10,000 documents on OSS, S3 and FileSystem
-- [Migrating from 0.4](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) and [from 0.3](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md)
+- [Migrating from 0.5](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md), [from 0.4](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) and [from 0.3](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md)
 
 ## License
 

@@ -6,7 +6,7 @@
 
 ## 安装与运行
 
-需要 Node.js >= 20 或 Bun。
+需要 Node.js >= 22 或 Bun。
 
 ```bash
 # 不安装，直接运行
@@ -43,6 +43,19 @@ bucket-db count users --url 'oss://my-bucket/app?region=cn-hangzhou'
 ```
 
 `endpoint` 参数的值需要 URL 编码，例如 `endpoint=http%3A%2F%2Flocalhost%3A9000`。
+
+### 代理
+
+命令行通过运行时内置的 `fetch` 访问 S3 / OSS，是否走代理取决于运行时。以下结果是通过一个 CONNECT 代理访问真实 S3 实测的：
+
+- **Bun**（1.4.2）默认遵循 `HTTPS_PROXY`。
+- **Node**（22.23.5、24.22.3）默认**忽略** `HTTP_PROXY` / `HTTPS_PROXY`，直接连接（即使配置的代理不可达，请求也会成功）。设置 `NODE_USE_ENV_PROXY=1`（Node 22.21.0+ / 24.0.0+）或使用参数 `--use-env-proxy`（Node 22.21.0+ / 24.5.0+）后请求经过代理。Node 将该功能标记为 "Stability 1.1 – Active development"。
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
+```
+
+`NO_PROXY` 的处理尚未测试。
 
 ## 命令
 

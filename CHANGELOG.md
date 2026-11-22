@@ -5,6 +5,28 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-22
+
+The last breaking release before 1.0: it settles the public types from the 1.0 API review. The storage format, the CLI, connection URLs, the MCP server and runtime behaviour are unchanged, so 0.5 and 0.6 read and write the same collections. Upgrading from 0.5: [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md).
+
+### BREAKING
+
+- `Collection` is exported as a type only. `new Collection(...)` and `instanceof Collection` no longer exist; collections come only from `db.collection(name)`. `CollectionOptions` is no longer exported: set the logger with `new BucketDB(adapter, dbPath, { logger })` or `BucketDB.connect(url, { logger })`.
+- `insert`, `put`, `findById`, `find` and `update` return `Stored<T>` = `T & { _etag: string }` instead of `T`, so `_etag` needs no non-null assertion. `_createdAt` and `_updatedAt` stay optional (a file placed in `docs/` by hand may lack them). Type-only change.
+- `QueryOptions` is `QueryOptions<T = Document>` and `sort` is `SortSpec<T>`: keys are the fields of `T` plus `id`, `_etag`, `_createdAt` and `_updatedAt`, so an unknown sort field is a compile error. Type-only change.
+- Requires Node.js >= 22 or Bun (`engines.node` was `>=20`). Node 20 reached end of life on 2026-04-30.
+
+### Added
+
+- Exported types `Stored<T>` and `SortSpec<T>`.
+- `bun run --cwd packages/core typecheck`: runs `tsc` on the source and on the public API type tests in `packages/core/tests/types/public-api.ts`, which pin the types above with `@ts-expect-error` cases. CI runs it. New "Public API types" section in [docs/GUARANTEES.md](docs/GUARANTEES.md).
+- Docs: [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md); a "Proxies" section in [docs/CLI.md](docs/CLI.md) and the README: the S3 / OSS client uses the runtime's `fetch`, which Bun points at `HTTPS_PROXY` by default and Node only with `NODE_USE_ENV_PROXY=1` (measured on Bun 1.4.2, Node 22.23.5 and 24.22.3 against real S3; `NO_PROXY` not tested).
+
+### Changed
+
+- `find` ignores a `sort` field whose direction is `undefined` (was a `ValidationError`); other values than `1` / `-1` still throw.
+- CI tests Node 22 and 24 (was 20 and 22), in the Node smoke test and the dogfood benchmark matrix.
+
 ## [0.5.0] - 2026-11-22
 
 Makes BucketDB easier to reach for: a connection URL, a `bucket-db` CLI with `doctor`, `put`, `insert` with a chosen id, `sort`, `count` and `deleteMany`, and query semantics that are settled rather than inherited. The storage format is unchanged; 0.4 and 0.5 read and write the same collections. Upgrading from 0.4: [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md).

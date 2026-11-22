@@ -18,7 +18,7 @@ echo '{"ms":1234}' | npx @hold-baby/bucket-db put runs "$GITHUB_RUN_ID"
 npx @hold-baby/bucket-db find runs --sort _createdAt:desc --limit 10 | jq '.[].ms'
 ```
 
-See [docs/CLI.md](docs/CLI.md), the [CI recipes](examples/ci/) and, upgrading from 0.4, [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md).
+See [docs/CLI.md](docs/CLI.md), the [CI recipes](examples/ci/) and, upgrading from 0.5, [docs/MIGRATION-0.6.md](docs/MIGRATION-0.6.md) (from 0.4: [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md)). Requires Node.js >= 22 or Bun.
 
 ## Documentation
 
@@ -43,6 +43,9 @@ bun test
 
 # Build
 bun run --cwd packages/core build
+
+# Type-check, including the public API type tests
+bun run --cwd packages/core typecheck
 ```
 
 ## License

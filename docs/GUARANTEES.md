@@ -1,6 +1,6 @@
 # Guarantees and Limits
 
-For 0.5.0. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
+For 0.6.0. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
 
 ## Per backend
 
@@ -47,6 +47,17 @@ Consistency level: every document in a result is a version that was committed at
 | Mixed types order as booleans < numbers < strings | "mixed types order as booleans < numbers < strings" |
 | An invalid sort direction or field is a `ValidationError` | "an invalid direction or field is a ValidationError" |
 
+## Public API types
+
+`packages/core/tests/types/public-api.ts`, compiled, never run, by `bun run --cwd packages/core typecheck` (`tsc -p tests/types`) on every push and pull request. A line marked `@ts-expect-error` fails the check if it stops being an error.
+
+| Guarantee | Checked by |
+|---|---|
+| `insert`, `findById`, `find` and `update` return `Stored<T>`: `_etag` is a `string`, usable as `update`'s `etag` without `!` | `packages/core/tests/types/public-api.ts`, "Returned documents always carry an etag" |
+| `sort` accepts the document's fields and `id`, `_etag`, `_createdAt`, `_updatedAt`; an unknown field or a direction other than `1` / `-1` does not compile | `packages/core/tests/types/public-api.ts`, "Sort keys are the document's fields plus the system fields" |
+| `insert` and `update` data cannot contain `id` or `_createdAt` | `packages/core/tests/types/public-api.ts`, "insert / put / update accept no system fields" |
+| `Collection` is exported as a type only; `new Collection()` does not compile | `packages/core/tests/types/public-api.ts`, "Collection is exported as a type only" |
+
 ## Connection URLs
 
 `core/connect.test.ts`, "connection URLs":
@@ -61,7 +72,7 @@ Consistency level: every document in a result is a version that was committed at
 
 ## CLI
 
-`core/cli.test.ts`, "bucket-db CLI", running `src/cli.ts` as a child process; the Node job in CI also runs the built CLI (`put`, `count`, `export | import`, `get`, `doctor`, exit code 2) on Node 20 and 22.
+`core/cli.test.ts`, "bucket-db CLI", running `src/cli.ts` as a child process; the Node job in CI also runs the built CLI (`put`, `count`, `export | import`, `get`, `doctor`, exit code 2) on Node 22 and 24.
 
 | Guarantee | Test |
 |---|---|
@@ -135,6 +146,7 @@ All in `core/snapshot.test.ts`, "query snapshot", against an in-memory adapter t
 - **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins. On versioned OSS buckets, create-if-absent is not enforced either.
 - **FileSystem conditional updates are single-process.** `etag` checks and the merging of concurrent `update`s hold only among writers in one process.
 - **Results are not a point-in-time snapshot.** See the consistency level above.
-- **0.3.x and 0.4 or later must not write the same collection at the same time.** 0.3 reads only its own index and does not see later writes. 0.4 and 0.5 write the same format through the same code paths, so they can share a collection; this follows from the code and is not covered by a test.
+- **0.3.x and 0.4 or later must not write the same collection at the same time.** 0.3 reads only its own index and does not see later writes. 0.4, 0.5 and 0.6 write the same format through the same code paths, so they can share a collection; this follows from the code and is not covered by a test.
 - **Only AWS S3 and Alibaba Cloud OSS are tested** among cloud services. Other S3-compatible services may work through `endpoint`; SeaweedFS runs in CI as a local stand-in.
 - **LIST read-after-write on OSS is observed, not promised.** AWS documents strong LIST consistency; for OSS, storage contract A7 keeps checking it on the real service.
+- **Proxies depend on the runtime.** The S3 / OSS client uses the built-in `fetch`. Measured against real S3 through a CONNECT proxy: Bun 1.4.2 honours `HTTPS_PROXY` by default; Node 22.23.5 and 24.22.3 ignore `HTTP_PROXY` / `HTTPS_PROXY` and connect directly unless `NODE_USE_ENV_PROXY=1` (Node 22.21.0+ / 24.0.0+) or `--use-env-proxy` (22.21.0+ / 24.5.0+) is set, which Node marks "Stability 1.1 – Active development". Checked by hand, not by a test in CI; `NO_PROXY` handling has not been tested. See [CLI.md](./CLI.md#proxies).
