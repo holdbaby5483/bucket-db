@@ -80,7 +80,7 @@
 | `export` 输出不含 `_etag` 的 JSON Lines；`import` 保留 id 和时间戳，没有 `id` 的行作为新文档插入 | "export then import into another collection keeps ids and timestamps" |
 | 错误输出到 stderr、退出码 1；含凭证的 URL 被拒绝且不打印凭证 | "errors go to stderr with exit code 1 and never echo URL credentials" |
 | `doctor` 在 FileSystem 和 S3 端点上通过，且不留下对象 | "doctor passes on the filesystem and an S3 endpoint and leaves nothing behind" |
-| 在声明不支持 compare-and-swap 的后端（OSS 方言）上，`doctor` 跳过该项并通过 | "doctor reports a backend that only pretends to create atomically" |
+| 在声明不支持 compare-and-swap 的后端（OSS 方言）上，`doctor` 跳过该项并通过 | "doctor skips compare-and-swap where the backend declares none" |
 
 `doctor` 本身检查的是真实服务：对象往返、LIST 立即反映写入/覆盖/删除且 etag 一致、10 个并发写入者下的不存在才创建和 compare-and-swap（必须恰好一个成功；后端声明不支持时跳过）。它已在真实 AWS S3 和阿里云 OSS 上手动运行通过。见[命令行 · doctor](/guide/cli#doctor)。
 
@@ -134,7 +134,9 @@
 | 模拟 S3（AWS 和 OSS 方言） | `conformance/fake-s3.test.ts` | 是（AWS 方言） | 每次 push 和 pull request |
 | 本地 S3（SeaweedFS） | `conformance/local-s3.test.ts` | 是 | 每次 push 和 pull request |
 | 真实 OSS | `conformance/real-buckets.test.ts` | 是 | 每次 push 到 `main` 和同仓库的 pull request |
-| 真实 AWS S3 | `conformance/real-buckets.test.ts` | 是 | 设置了 `TEST_S3_BUCKET` 和 AWS 凭证时手动运行（暂无 CI 密钥） |
+| 真实 AWS S3 | `conformance/real-buckets.test.ts` | 是 | 每次 push 到 `main` 和同仓库的 pull request（使用只能访问测试桶的专用 IAM 用户） |
+
+版本之间哪些可以变、哪些不能变，见[兼容策略](./compatibility)。
 
 ## 限制
 

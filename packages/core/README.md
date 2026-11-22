@@ -534,6 +534,7 @@ A custom `StorageAdapter` can set `readonly remote = true` to get the query snap
 - [API reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md)
 - [CLI reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md) and [CI recipes](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci)
 - [Guarantees and limits](https://github.com/holdbaby5483/bucket-db/blob/main/docs/GUARANTEES.md): what each backend guarantees and the test that checks it
+- [Compatibility policy](https://github.com/holdbaby5483/bucket-db/blob/main/docs/COMPATIBILITY.md): what may change between releases from 1.0 on
 - [Storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md): the keys and JSON BucketDB writes
 - [Benchmarks](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md): requests and latency at 100 to 10,000 documents on OSS, S3 and FileSystem
 - [Migrating from 0.5](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md), [from 0.4](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.5.md) and [from 0.3](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.4.md)

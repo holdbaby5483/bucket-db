@@ -80,7 +80,7 @@ Consistency level: every document in a result is a version that was committed at
 | `export` prints JSON Lines without `_etag`; `import` keeps ids and timestamps and inserts lines without `id` | "export then import into another collection keeps ids and timestamps" |
 | Errors go to stderr with exit code 1; a URL with credentials is refused without printing them | "errors go to stderr with exit code 1 and never echo URL credentials" |
 | `doctor` passes on FileSystem and an S3 endpoint and leaves no objects behind | "doctor passes on the filesystem and an S3 endpoint and leaves nothing behind" |
-| `doctor` skips compare-and-swap on a backend that declares none (OSS dialect) and still passes | "doctor reports a backend that only pretends to create atomically" |
+| `doctor` skips compare-and-swap on a backend that declares none (OSS dialect) and still passes | "doctor skips compare-and-swap where the backend declares none" |
 
 `doctor` itself checks a live service: an object round trip, LIST reflecting writes, overwrites and deletes immediately with matching etags, create-if-absent and compare-and-swap with 10 concurrent writers (exactly one must win; skipped where the backend declares none). It has passed against real AWS S3 and Alibaba Cloud OSS, run by hand. See [CLI.md](./CLI.md#doctor).
 
@@ -134,7 +134,9 @@ All in `core/snapshot.test.ts`, "query snapshot", against an in-memory adapter t
 | Fake S3 (AWS and OSS dialects) | `conformance/fake-s3.test.ts` | yes (AWS dialect) | every push and pull request |
 | Local S3 (SeaweedFS) | `conformance/local-s3.test.ts` | yes | every push and pull request |
 | Real OSS | `conformance/real-buckets.test.ts` | yes | every push to `main` and same-repository pull request |
-| Real AWS S3 | `conformance/real-buckets.test.ts` | yes | manually, when `TEST_S3_BUCKET` and AWS credentials are set (no CI secrets yet) |
+| Real AWS S3 | `conformance/real-buckets.test.ts` | yes | every push to `main` and same-repository pull request (a test-only IAM user limited to the test bucket) |
+
+What may and may not change between releases is in [COMPATIBILITY.md](./COMPATIBILITY.md).
 
 ## Limits
 

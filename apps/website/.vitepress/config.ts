@@ -39,7 +39,8 @@ export default defineConfig({
             { text: '查询语法', link: '/guide/queries' },
             { text: '错误处理', link: '/guide/error-handling' },
             { text: '存储格式', link: '/guide/storage-format' },
-            { text: '保证与限制', link: '/guide/guarantees' }
+            { text: '保证与限制', link: '/guide/guarantees' },
+            { text: '兼容策略', link: '/guide/compatibility' }
           ]
         },
         {

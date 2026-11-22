@@ -108,7 +108,7 @@ describe('bucket-db CLI', () => {
     }
   });
 
-  test('doctor reports a backend that only pretends to create atomically', async () => {
+  test('doctor skips compare-and-swap where the backend declares none', async () => {
     const s3 = startFakeS3('fake', { dialect: 'oss' });
     try {
       const result = await cli(
