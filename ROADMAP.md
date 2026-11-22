@@ -14,11 +14,12 @@
 | M0、M1a、M1b | 已完成。0.3.2、0.4.0-beta.0、0.4.0 没有单独发布，内容并入 0.5.0 |
 | M2 | 已完成，0.5.0 已发布到 npm（trusted publishing，带 provenance） |
 | 1.0 前 API 审查 | 已完成（[`docs/history/API_REVIEW_1.0.md`](docs/history/API_REVIEW_1.0.md)），破坏性部分在 0.6.0 发布 |
+| 查询界面 | 已完成，0.7.0：`bucket-db ui`，本地只读页面，放在核心包内（设计见 [`docs/history/UI_PLAN.md`](docs/history/UI_PLAN.md)） |
 | M3 | 只剩一项出口标准：自用数据集连续 100 次 CI 运行无失败（Dogfood 工作流每 4 小时一次，2026-11-22 开始计数） |
 
 M3 其余各项：保证表已定稿（`docs/GUARANTEES.md`），兼容策略已写进 `docs/COMPATIBILITY.md`；lint、Bun 版本固定、冻结锁文件、release action 替换已完成；真实 OSS 和 S3 的一致性套件都在 CI 中运行。
 
-第 2 节的小巧指标（0.6.0，由 `packages/core/scripts/check-budget.sh` 在 CI 中检查）：运行时依赖 0；安装后 1 个包、134 kB；发布包 40 kB；源码 2,049 行（上限 2,070）。
+第 2 节的小巧指标（0.7.0，由 `packages/core/scripts/check-budget.sh` 在 CI 中检查）：运行时依赖 0；安装后 1 个包、148 kB；发布包 46 kB；库和 CLI 源码 2,057 行（上限 2,070）；界面服务端 257 行（上限 300）。
 
 未完成：CI 访问 S3 用的是只能访问测试桶的静态密钥，换成 OIDC 需要 AWS IAM 管理员权限（`examples/ci/` 里有策略模板）。
 
@@ -58,7 +59,7 @@ M3 其余各项：保证表已定稿（`docs/GUARANTEES.md`），兼容策略已
 | `npm install` 后的包数 | 116 | 1 |
 | `npm install` 后的体积 | 36 MB | 小于 200 kB |
 | 发布包体积 | 29.4 kB | 不超过 50 kB |
-| 源码行数（含 CLI） | 2,070 | 不超过 2,070 |
+| 源码行数（含 CLI） | 2,070 | 不超过 2,070。0.7.0 起查询界面（`src/ui`）单独计，服务端不超过 300 行；其余三项上限不变（2026-11-22 决定） |
 
 存储格式用一页文档讲完。
 
@@ -325,6 +326,7 @@ S3 **实测**，20 个并发写同一个 key，各 5 轮：
 - 快照分片，用于放宽包络。
 - OSS 上用带版本号的 key 实现原子更新。
 - 带 `etag` 的条件删除。S3 **实测**支持：ETag 不匹配时返回 412，对象保留。
+- 存储接口支持 `delimiter`（按“目录”列举）。查询界面现在靠扫描全库的 key 来列出集合，成本与 key 总数成正比；有了它只需“集合数 / 1000”次请求。需要改四个后端，约 20 行核心代码。
 
 ## 6. 决策记录
 

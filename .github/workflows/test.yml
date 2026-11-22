@@ -88,6 +88,15 @@ jobs:
           $cli get copy sha-1 | grep -q '"ms":42'
           $cli doctor
           if $cli get runs missing; then exit 1; else test $? -eq 2; fi
+          # the query UI on Node: token exchanged for the cookie, the page, one query
+          $cli ui --no-open --port 7340 > ui.log &
+          ui_pid=$!
+          for _ in $(seq 50); do grep -q token= ui.log && break; sleep 0.2; done
+          curl -sf -c ui.cookies -o /dev/null "$(grep -o 'http://[^ ]*' ui.log)"
+          curl -sf -b ui.cookies http://127.0.0.1:7340/ | grep -q '<title>bucket-db</title>'
+          curl -sf -b ui.cookies 'http://127.0.0.1:7340/api/find?collection=runs' | grep -q '"ms":42'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7340/api/find?collection=runs)" = 403
+          kill "$ui_pid"
 
   local-s3:
     name: Conformance on a local S3 (SeaweedFS)

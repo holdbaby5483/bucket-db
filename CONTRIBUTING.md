@@ -20,6 +20,8 @@ packages/core/            @hold-baby/bucket-db, the published package (zero runt
   src/                    bucket-db.ts, collection.ts, query.ts, snapshot.ts, keys.ts, url.ts,
                           errors.ts, types.ts, cli.ts, doctor.ts; index.ts is the public export list
   src/storage/            adapter.ts (StorageAdapter), memory.ts, fs.ts, s3/ (S3 and OSS client, SigV4)
+  src/ui/                 the `bucket-db ui` command: server.ts (local HTTP server) and index.html (the page,
+                          plain JavaScript, no build step; `bun run build` copies it to dist/ui/)
   tests/                  conformance/ (adapter and collection suites per backend), core/, query/,
                           storage/, support/ (fakes and workers), types/ (public API type tests)
   scripts/                check-budget.sh (size gates), node-smoke.mjs (built package on Node)
@@ -54,7 +56,8 @@ CI also runs `bun run index.ts` in `examples/basic-usage`, `examples/local-stora
 | Installed packages | 1 (BucketDB itself) |
 | Installed size | < 200 kB |
 | Tarball size | <= 50 kB |
-| `packages/core/src` | <= 2,070 lines in total |
+| `packages/core/src` without `src/ui` | <= 2,070 lines in total |
+| `packages/core/src/ui/*.ts` | <= 300 lines in total (the page, `index.html`, is bounded by the tarball size) |
 
 ### Tests against real buckets
 

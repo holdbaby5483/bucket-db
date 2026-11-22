@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1.0.0 is expected to have no API change from 0.6.1; what it adds is the promise in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1.0.0 is expected to have no API change from 0.7.0; what it adds is the promise in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
+## [0.7.0] - 2026-11-22
+
+Adds a page for looking at a database. No API, storage format or behaviour change: 0.6 and 0.7 are interchangeable.
+
+### Added
+
+- `bucket-db ui [--port n] [--no-open]`: serves a read-only page on `127.0.0.1` (default port 7340) and opens it in the browser. Collections with their document counts, a table with the same JSON filters as `find`, sorting by column, 50 documents a page, and each document as JSON. The view is kept in the address bar, so reload, back and pasted links work. Light and dark themes; English or Chinese by browser language. Reference: [docs/UI.md](docs/UI.md).
+- The page cannot create, change or delete documents: the server answers only `GET` and has no endpoint that writes one. On S3 / OSS its queries are ordinary `find` calls and may rewrite the query snapshot; use read-only credentials to rule out any write.
+- Because the process holds storage credentials, it accepts only its own browser session: a random launch token exchanged for an `HttpOnly`, `SameSite=Strict` cookie, a `Host` check against DNS rebinding, an `Origin` check, no CORS headers, and a Content-Security-Policy on the page.
+- Collections are found by listing the keys under the database prefix (one LIST per 1,000 keys, no document reads); the scan pauses after 100,000 keys and can be continued.
+
+### Changed
+
+- Size gates: the library and CLI stay within 2,070 source lines (2,057); the UI server has its own limit of 300 (257). The tarball grows from 38 kB to 46 kB, inside the unchanged 50 kB limit; still no dependencies.
+- CI runs the built `ui` command on Node 22 and 24.
 
 ## [0.6.1] - 2026-11-22
 

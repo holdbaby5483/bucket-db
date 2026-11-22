@@ -72,6 +72,7 @@ Usage: bucket-db <command> [arguments] [--url <url>]
   import <collection> [file]       write JSON Lines from a file or stdin; documents keep id and timestamps
   compact <collection>             rebuild the query snapshot
   doctor                           check what the storage service guarantees
+  ui [--port n] [--no-open]        browse the database in a local web page (default port 7340)
 ```
 
 ### get
@@ -151,6 +152,14 @@ bucket-db doctor
 ```
 
 检查存储服务提供的保证，详见下文 [doctor](#doctor)。
+
+### ui（查询界面）
+
+```bash
+bucket-db ui
+```
+
+在本机启动一个只读的网页并用浏览器打开，用来浏览数据库中的集合和文档（默认端口 7340），选项 `--port n`、`--no-open` 及安全说明详见[查询界面](./ui)。
 
 ## 选项
 

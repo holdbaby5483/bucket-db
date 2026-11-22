@@ -7,8 +7,8 @@
 - **Node.js** 22+ 或 **Bun**（Node 20 已于 2026-04-30 停止维护，0.6 起不再支持）
 - **TypeScript** 5.0+（推荐）
 
-::: tip 0.6
-当前版本为 0.6.1。0.6 是 1.0 之前最后一个包含不兼容变更的版本：`Collection` 只导出类型、返回的文档类型为 `Stored<T>`、`sort` 字段做类型检查、要求 Node.js 22+。从 0.5、0.4 或 0.3.x 升级请阅读[升级指南](./migration)。
+::: tip 0.7
+当前版本为 0.7.0。0.7.0 新增查询界面（`bucket-db ui`，见[查询界面](./ui)），API 没有变化。0.6 是 1.0 之前最后一个包含不兼容变更的版本：`Collection` 只导出类型、返回的文档类型为 `Stored<T>`、`sort` 字段做类型检查、要求 Node.js 22+。从 0.5、0.4 或 0.3.x 升级请阅读[升级指南](./migration)。
 :::
 
 ## 包管理器
@@ -46,7 +46,7 @@ BucketDB 核心包 (`@hold-baby/bucket-db`) **没有任何运行时依赖**，�
 - FileSystemAdapter（文件系统存储）
 - S3Adapter（AWS S3 及 S3 兼容服务）
 - OSSAdapter（阿里云 OSS）
-- 命令行工具 `bucket-db`（`npx @hold-baby/bucket-db <命令>`，见[命令行](./cli)）
+- 命令行工具 `bucket-db`（`npx @hold-baby/bucket-db <命令>`，见[命令行](./cli)），其中包含本地只读的查询界面 `bucket-db ui`（见[查询界面](./ui)）
 
 S3 与 OSS 适配器使用内置的 S3 客户端（基于 Web Crypto 的 SigV4 签名），无需安装任何云厂商 SDK。`S3Adapter` 可通过 `endpoint` 连接任意 S3 兼容服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。
 

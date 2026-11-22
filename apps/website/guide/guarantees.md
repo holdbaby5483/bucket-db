@@ -1,6 +1,6 @@
 # 保证与限制
 
-适用于 0.6.1。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
+适用于 0.7.0。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
 
 ## 各后端
 
@@ -95,6 +95,24 @@
 | `db_insert`、`db_put`、`db_find`、`db_count`、`db_update`、`db_delete` 可通过协议调用 | "insert, put, find, count, update and delete through tools" |
 | 已被占用的 `id` 和不合法的名字以工具错误返回 | "insert with a taken id and invalid names are reported as tool errors" |
 | 没有 `BUCKET_DB_URL` 时服务器输出提示并退出 | "without BUCKET_DB_URL the server exits with a message" |
+
+## 查询界面
+
+`core/ui.test.ts` 中的 "query UI server" 和 "bucket-db ui"，针对 [`bucket-db ui`](./ui) 背后的 HTTP 服务器：
+
+| 保证 | 测试 |
+|---|---|
+| 没有会话 cookie 时不提供任何内容；启动令牌换取一个 `HttpOnly`、`SameSite=Strict` 的 cookie；不发送任何 CORS 响应头 | "the launch token becomes a session cookie, and nothing is served without it" |
+| `Host` 或 `Origin` 来自外部的请求，或 `GET` 以外的方法，即使带有 cookie 也会被拒绝 | "a foreign Host or Origin, or a method other than GET, is refused even with the cookie" |
+| 集合列表是数据库前缀下有文档的名字及其文档数；其他前缀、快照和无关文件不计入 | "collections are the names with documents under the database prefix, with their counts"、"a database at the bucket root is scanned from the empty prefix" |
+| 集合扫描在 100 页 LIST 之后暂停，收到请求后继续 | "the scan pauses after 100 list pages and continues on request" |
+| 一页结果恰好是 `collection.find` 对相同过滤条件和排序返回的内容 | "find pages through exactly what the library returns for the same filter and sort" |
+| 不合法的过滤条件、排序、页码或集合名是一个错误，且不读取存储 | "an invalid filter, sort, page or collection name is a 400 that reads no storage" |
+| 翻页不读取任何新内容；查询变化或点击“刷新”时重新读取 | "pages are served from the last query until the query changes or is refreshed" |
+| 存储失败显示为错误，而不是空结果 | "a storage failure is reported as an error, not as an empty result" |
+| `bucket-db ui` 打印一个地址，其中的令牌可以打开 `--url` 指定的数据库 | "prints a local URL whose token opens the page for the database in --url" |
+
+服务器没有任何写入文档的端点。页面本身（渲染、点击列头排序、地址栏状态、浅色和深色主题、两种语言）是在 Chromium 中手动检查的：Node 22 上针对 FileSystem 数据库，Node 24 上针对真实 S3；CI 中没有对应的测试。
 
 ## 快照（S3、OSS 及 `remote: true` 的适配器）
 

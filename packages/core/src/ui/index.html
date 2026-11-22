@@ -87,7 +87,7 @@ pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; }
 const zh = navigator.language.toLowerCase().startsWith('zh');
 const T = zh ? {
   collections: '集合', open: '输入集合名打开', scanning: '正在扫描…', truncated: '列表可能不完整。', more: '继续扫描', none: '没有找到集合。',
-  filter: '筛选条件（JSON），例如 {"ok":true,"ms":{"$lt":2000}}', run: '查询', refresh: '刷新', readOnly: '不修改文档',
+  filter: '过滤条件（JSON），例如 {"ok":true,"ms":{"$lt":2000}}', run: '查询', refresh: '刷新', readOnly: '不修改文档',
   pick: '请选择一个集合。', empty: '没有匹配的文档。', select: '点击一行查看完整文档。', copy: '复制', copied: '已复制', prev: '上一页', next: '下一页',
   status: (n, ms, at) => `匹配 ${n} 条 · 用时 ${ms} · 读取于 ${at}`, range: (a, b, n) => `第 ${a}–${b} 条，共 ${n} 条`,
 } : {

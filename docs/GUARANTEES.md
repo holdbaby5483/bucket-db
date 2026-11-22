@@ -1,6 +1,6 @@
 # Guarantees and Limits
 
-For 0.6.1. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
+For 0.7.0. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
 
 ## Per backend
 
@@ -95,6 +95,24 @@ Consistency level: every document in a result is a version that was committed at
 | `db_insert`, `db_put`, `db_find`, `db_count`, `db_update` and `db_delete` work through the protocol | "insert, put, find, count, update and delete through tools" |
 | A taken `id` and invalid names come back as tool errors | "insert with a taken id and invalid names are reported as tool errors" |
 | Without `BUCKET_DB_URL` the server exits with a message | "without BUCKET_DB_URL the server exits with a message" |
+
+## Query UI
+
+`core/ui.test.ts`, "query UI server" and "bucket-db ui", against the HTTP server behind [`bucket-db ui`](./UI.md):
+
+| Guarantee | Test |
+|---|---|
+| Nothing is served without the session cookie; the launch token is exchanged for an `HttpOnly`, `SameSite=Strict` cookie; no CORS header is sent | "the launch token becomes a session cookie, and nothing is served without it" |
+| A request with a foreign `Host` or `Origin`, or a method other than `GET`, is refused even with the cookie | "a foreign Host or Origin, or a method other than GET, is refused even with the cookie" |
+| The collection list is the names that have documents under the database prefix, with their counts; other prefixes, snapshots and stray files are not counted | "collections are the names with documents under the database prefix, with their counts", "a database at the bucket root is scanned from the empty prefix" |
+| The collection scan pauses after 100 list pages and continues on request | "the scan pauses after 100 list pages and continues on request" |
+| A page of results is exactly what `collection.find` returns for the same filter and sort | "find pages through exactly what the library returns for the same filter and sort" |
+| An invalid filter, sort, page or collection name is an error that reads no storage | "an invalid filter, sort, page or collection name is a 400 that reads no storage" |
+| Paging reads nothing new; a changed query or Refresh reads again | "pages are served from the last query until the query changes or is refreshed" |
+| A storage failure is shown as an error, never as an empty result | "a storage failure is reported as an error, not as an empty result" |
+| `bucket-db ui` prints an address whose token opens the database named by `--url` | "prints a local URL whose token opens the page for the database in --url" |
+
+The server has no endpoint that writes a document. The page itself (rendering, sorting by header, the address-bar state, light and dark themes, both languages) was checked by hand in Chromium against a FileSystem database on Node 22 and against real S3 on Node 24; it has no test in CI.
 
 ## Snapshot (S3, OSS and adapters with `remote: true`)
 

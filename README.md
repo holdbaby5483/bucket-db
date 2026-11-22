@@ -16,7 +16,7 @@ Requires Node.js >= 22 or Bun. Usage, guarantees and adapters: [packages/core/RE
 📚 https://bucket-db.pages.dev
 
 - [API reference](docs/API.md)
-- [CLI reference](docs/CLI.md)
+- [CLI reference](docs/CLI.md) and the [query UI](docs/UI.md) (`bucket-db ui`)
 - [Guarantees and limits](docs/GUARANTEES.md)
 - [Compatibility policy](docs/COMPATIBILITY.md)
 - [Storage format](docs/STORAGE-FORMAT.md)

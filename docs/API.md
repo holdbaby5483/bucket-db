@@ -1,6 +1,6 @@
 # BucketDB API Reference
 
-Complete API documentation for BucketDB 0.6. Requires Node.js >= 22 or Bun. Upgrading from 0.5: see [MIGRATION-0.6.md](./MIGRATION-0.6.md); from 0.4: [MIGRATION-0.5.md](./MIGRATION-0.5.md); from 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md). The `bucket-db` command line tool is described in [CLI.md](./CLI.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
+Complete API documentation for BucketDB 0.7. Requires Node.js >= 22 or Bun. Upgrading from 0.5: see [MIGRATION-0.6.md](./MIGRATION-0.6.md); from 0.4: [MIGRATION-0.5.md](./MIGRATION-0.5.md); from 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md). The `bucket-db` command line tool is described in [CLI.md](./CLI.md), its browsing page in [UI.md](./UI.md). Related: [GUARANTEES.md](./GUARANTEES.md) (what each backend guarantees, and the tests), [STORAGE-FORMAT.md](./STORAGE-FORMAT.md) (keys and JSON written), [BENCHMARKS.md](./BENCHMARKS.md) (measured requests and latency).
 
 ## Table of Contents
 
