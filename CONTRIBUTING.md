@@ -1,427 +1,119 @@
 # Contributing to BucketDB
 
-Thank you for your interest in contributing to BucketDB! This guide will help you get started.
+Bug reports and pull requests are welcome at https://github.com/holdbaby5483/bucket-db.
 
-## Table of Contents
+## Prerequisites
 
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Project Structure](#project-structure)
-- [Development Workflow](#development-workflow)
-- [Testing](#testing)
-- [Code Style](#code-style)
-- [Submitting Changes](#submitting-changes)
-- [Release Process](#release-process)
-
----
-
-## Code of Conduct
-
-This project follows the [Contributor Covenant Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). By participating, you are expected to uphold this code.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- **Bun** v1.0+ ([installation guide](https://bun.sh/docs/installation))
-- **Git**
-- **Node.js** v18+ (for tooling compatibility)
-
-### Fork and Clone
-
-1. Fork the repository on GitHub
-2. Clone your fork:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/bucket-db.git
-   cd bucket-db
-   ```
-3. Add upstream remote:
-   ```bash
-   git remote add upstream https://github.com/original/bucket-db.git
-   ```
-
----
-
-## Development Setup
-
-### Install Dependencies
+- [Bun](https://bun.sh) 1.4.2 (the version CI pins)
+- Node.js 22 or later (the published package supports Node >= 22; CI smoke-tests Node 22 and 24)
 
 ```bash
-bun install
+git clone https://github.com/holdbaby5483/bucket-db.git
+cd bucket-db
+bun install --frozen-lockfile
 ```
 
-### Build All Packages
+## Project layout
+
+```
+packages/core/            @hold-baby/bucket-db, the published package (zero runtime dependencies)
+  src/                    bucket-db.ts, collection.ts, query.ts, snapshot.ts, keys.ts, url.ts,
+                          errors.ts, types.ts, cli.ts, doctor.ts; index.ts is the public export list
+  src/storage/            adapter.ts (StorageAdapter), memory.ts, fs.ts, s3/ (S3 and OSS client, SigV4)
+  tests/                  conformance/ (adapter and collection suites per backend), core/, query/,
+                          storage/, support/ (fakes and workers), types/ (public API type tests)
+  scripts/                check-budget.sh (size gates), node-smoke.mjs (built package on Node)
+  bench/                  run.ts, the benchmark behind docs/BENCHMARKS.md
+apps/mcp/                 MCP server (private, not on npm), see apps/mcp/README.md
+apps/website/             documentation site (VitePress, Chinese), https://bucket-db.pages.dev
+examples/                 runnable examples and CI recipes, see examples/README.md
+docs/                     English reference docs
+```
+
+## Checks
+
+CI (`.github/workflows/test.yml`) runs these; run them before opening a pull request. `bun run format` fixes what
+`bun run lint` reports as formatting.
 
 ```bash
-bun run build
+bun run lint                              # biome ci .  (lint + format check)
+bun run --cwd packages/core build         # tsc; tests of apps/mcp and the steps below need the build
+bun run --cwd packages/core typecheck     # tsc --noEmit, plus the type tests in tests/types
+bun test                                  # all tests in the workspace
+packages/core/scripts/check-budget.sh     # size and dependency gates
+node packages/core/scripts/node-smoke.mjs # the built package on Node
 ```
 
-### Run Tests
+CI also runs `bun run index.ts` in `examples/basic-usage`, `examples/local-storage` and `examples/dbpath-demo`.
 
-```bash
-bun test
+`check-budget.sh` fails the build if any of these is exceeded:
+
+| Gate | Limit |
+|---|---|
+| Runtime dependencies | 0 |
+| Installed packages | 1 (BucketDB itself) |
+| Installed size | < 200 kB |
+| Tarball size | <= 50 kB |
+| `packages/core/src` | <= 2,070 lines in total |
+
+### Tests against real buckets
+
+`bun test` runs everything against memory, the filesystem and an in-process fake S3. The tests against real
+services skip themselves unless their variables are set; Bun reads them from a `.env` file at the repository root:
+
+- OSS: `OSS_BUCKET`, `OSS_REGION`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`
+- S3: `TEST_S3_BUCKET`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- A local S3 (CI uses SeaweedFS): `LOCAL_S3_ENDPOINT`, `LOCAL_S3_BUCKET`, optionally `LOCAL_S3_ACCESS_KEY_ID`,
+  `LOCAL_S3_SECRET_ACCESS_KEY`, `LOCAL_S3_REGION`
+
+Never commit `.env` (it is in `.gitignore`). Tests and benchmarks that touch a real bucket must write only under
+the `test/` prefix and clean up after themselves. See [docs/security/credentials.md](docs/security/credentials.md)
+for how to scope credentials.
+
+### The M0 regression test
+
+`packages/core/tests/core/collection-faults.test.ts` is the M0 regression test and must stay byte-identical; that
+is why `biome.json` excludes it from linting and formatting. Do not reformat or edit it. If a change makes it
+fail, the change is wrong.
+
+## Code
+
+- TypeScript strict mode; Biome settles formatting (2 spaces, single quotes, 120 columns).
+- `packages/core` must keep zero runtime dependencies and stay within the budgets above.
+- A change to the public API starts in `packages/core/src/index.ts`; update `tests/types/public-api.ts`,
+  `docs/API.md` and the changelog with it. What may change before and after 1.0 is in
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+- A change to the stored format needs an entry in [docs/STORAGE-FORMAT.md](docs/STORAGE-FORMAT.md) and an upgrade
+  note in the matching `docs/MIGRATION-*.md`.
+- A new guarantee needs a test that proves it, listed in [docs/GUARANTEES.md](docs/GUARANTEES.md).
+
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/), in English, with a scope where it helps and `!` for
+breaking changes. Examples from the history:
+
+```
+feat(core): bucket-db CLI with doctor, export and import
+feat(core)!: settle public types before 1.0
+fix(core): count a changed document once when deciding to rewrite the snapshot
+perf(core): add benchmark script and results
+ci(publish): rely on npm trusted publishing only
+docs(website): stop double-escaping generics in API headings
+style: format with Biome
 ```
 
-### Run Examples
+## Documentation
 
-```bash
-# Basic usage example
-bun run examples/basic-usage/index.ts
+- `docs/` is the English source of truth; `apps/website/guide/` is the Chinese mirror. Change both together.
+- `apps/website/api/*.md` are generated from `docs/API.md`: do not edit them; run `bun run sync` in
+  `apps/website` (the website build runs it too).
+- Each topic has one home (guarantees in `docs/GUARANTEES.md`, the API in `docs/API.md`, the CLI in `docs/CLI.md`,
+  numbers in `docs/BENCHMARKS.md`); link to it instead of repeating it.
 
-# Local storage example
-bun run examples/local-storage/index.ts
+## Releases
 
-# Multi-database example
-bun run examples/dbpath-demo/index.ts
-```
-
----
-
-## Project Structure
-
-```
-bucket-db/
-├── packages/
-│   └── core/                 # Core database engine (published as @hold-baby/bucket-db)
-│       ├── src/
-│       │   ├── core/        # BucketDB, Collection
-│       │   ├── storage/     # Storage adapters
-│       │   ├── index/       # Shard management
-│       │   ├── query/       # Query evaluation
-│       │   ├── types/       # TypeScript type definitions
-│       │   └── utils/       # Hash utilities
-│       └── tests/           # Test files
-├── apps/                    # Internal apps (not published)
-│   ├── mcp/                 # MCP server for AI tools
-│   └── website/             # VitePress documentation site
-├── examples/                # Example projects
-├── docs/                    # Documentation
-│   └── API.md              # API reference
-├── package.json            # Root workspace config
-└── bunfig.toml            # Bun configuration
-```
-
-### Key Files
-
-- `packages/core/src/index.ts` - Main export file
-- `packages/core/src/types/index.ts` - Type definitions
-- `packages/core/tests/` - All test files
-
----
-
-## Development Workflow
-
-### 1. Create a Feature Branch
-
-```bash
-git checkout -b feature/your-feature-name
-```
-
-### 2. Make Your Changes
-
-Follow the [TDD approach](#test-driven-development):
-1. Write failing tests
-2. Implement feature
-3. Verify tests pass
-4. Refactor if needed
-
-### 3. Test Your Changes
-
-```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test tests/core/collection.test.ts
-
-# Watch mode
-bun test --watch
-```
-
-### 4. Build and Verify
-
-```bash
-# Build packages
-bun run build
-
-# Run examples to verify
-bun run examples/basic-usage/index.ts
-```
-
-### 5. Commit Your Changes
-
-Follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-```bash
-# Format: <type>: <description>
-# Types: feat, fix, docs, refactor, test, chore, perf
-
-git commit -m "feat: add new query operator"
-git commit -m "fix: resolve concurrent update issue"
-git commit -m "docs: update API documentation"
-```
-
----
-
-## Testing
-
-### Test-Driven Development
-
-BucketDB follows TDD principles:
-
-1. **Write failing test** - Define expected behavior
-2. **Implement feature** - Make test pass
-3. **Refactor** - Improve code quality
-4. **Verify** - Ensure all tests still pass
-
-### Test Structure
-
-```typescript
-import { describe, test, expect, beforeEach } from 'bun:test';
-
-describe('FeatureName', () => {
-  beforeEach(() => {
-    // Setup
-  });
-
-  test('should do something', async () => {
-    // Arrange
-    const input = /* ... */;
-
-    // Act
-    const result = await functionUnderTest(input);
-
-    // Assert
-    expect(result).toBe(expected);
-  });
-});
-```
-
-### Test Coverage Guidelines
-
-- **Core functionality**: 100% coverage
-- **Storage adapters**: Test all CRUD operations
-- **Query engine**: Test all operators
-- **Error handling**: Test error cases
-
-### Running Tests
-
-```bash
-# All tests
-bun test
-
-# Specific file
-bun test tests/core/collection.test.ts
-
-# Pattern matching
-bun test storage
-
-# Watch mode
-bun test --watch
-```
-
----
-
-## Code Style
-
-### TypeScript Guidelines
-
-- **Strict mode**: All code must pass TypeScript strict checks
-- **Type safety**: Avoid `any`, use proper types
-- **Interfaces**: Use interfaces for public APIs
-- **JSDoc**: Document public methods and classes
-
-### Naming Conventions
-
-- **Files**: kebab-case (e.g., `shard-manager.ts`)
-- **Classes**: PascalCase (e.g., `ShardManager`)
-- **Functions/Methods**: camelCase (e.g., `evaluateFilter`)
-- **Interfaces**: PascalCase with `I` prefix for implementations (e.g., `ICollection`)
-- **Types**: PascalCase (e.g., `QueryFilter`)
-
-### Code Organization
-
-```typescript
-// 1. Imports
-import type { StorageAdapter } from '@bucket-db/types';
-import { StorageError } from '@bucket-db/types';
-
-// 2. Type definitions
-interface Config {
-  // ...
-}
-
-// 3. Class/function implementation
-export class MyClass {
-  // Private fields first
-  private field: string;
-
-  // Constructor
-  constructor(config: Config) {
-    // ...
-  }
-
-  // Public methods
-  public async method(): Promise<void> {
-    // ...
-  }
-
-  // Private methods
-  private helper(): void {
-    // ...
-  }
-}
-```
-
-### Documentation
-
-- **JSDoc**: Document all exported functions/classes
-- **Examples**: Include usage examples in docs
-- **Comments**: Explain "why", not "what"
-
-```typescript
-/**
- * Evaluates a query filter against a document
- *
- * @param document - The document to evaluate
- * @param filter - The query filter to apply
- * @returns true if document matches filter
- */
-export function evaluateFilter<T>(
-  document: T,
-  filter: QueryFilter<T>
-): boolean {
-  // Implementation
-}
-```
-
----
-
-## Submitting Changes
-
-### Pull Request Process
-
-1. **Update documentation** if needed
-2. **Add tests** for new features
-3. **Ensure all tests pass**: `bun test`
-4. **Build successfully**: `bun run build`
-5. **Push to your fork**:
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-6. **Create Pull Request** on GitHub
-
-### Pull Request Guidelines
-
-- **Title**: Follow conventional commits format
-- **Description**: Explain what and why
-- **Link issues**: Reference related issues
-- **Small PRs**: Keep changes focused
-
-### PR Template
-
-```markdown
-## Description
-Brief description of changes
-
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-- [ ] All tests pass
-- [ ] Added new tests
-- [ ] Updated documentation
-
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Self-review completed
-- [ ] Comments added for complex logic
-- [ ] Documentation updated
-- [ ] No breaking changes (or documented)
-```
-
----
-
-## Release Process
-
-Releases are managed by maintainers.
-
-### Version Numbering
-
-BucketDB follows [Semantic Versioning](https://semver.org/):
-
-- **MAJOR**: Breaking changes
-- **MINOR**: New features (backward compatible)
-- **PATCH**: Bug fixes
-
-### Release Checklist
-
-1. Update version in `package.json` files
-2. Update CHANGELOG.md
-3. Run full test suite
-4. Build all packages
-5. Create git tag
-6. Publish to NPM
-7. Create GitHub release
-
----
-
-## Areas for Contribution
-
-### High Priority
-
-- [ ] Performance benchmarks and optimization
-- [ ] Additional query operators ($exists, $regex, etc.)
-- [ ] Sorting support
-- [ ] Batch operations (insertBatch, updateBatch, deleteBatch)
-- [ ] Count aggregation
-
-### Medium Priority
-
-- [ ] More storage adapters (Google Cloud Storage, Azure Blob, etc.)
-- [ ] CLI tools for data import/export
-- [ ] Migration utilities
-- [ ] Enhanced error messages
-
-### Documentation
-
-- [ ] Tutorial videos
-- [ ] More examples
-- [ ] Performance tuning guide
-- [ ] Migration guides from other databases
-
-### Testing
-
-- [ ] Integration tests with real cloud services
-- [ ] Performance benchmarks
-- [ ] Stress testing
-- [ ] Load testing scripts
-
----
-
-## Getting Help
-
-- **GitHub Issues**: Bug reports and feature requests
-- **Discussions**: Questions and community support
-- **Email**: For security issues only
-
----
-
-## Recognition
-
-Contributors are recognized in:
-- CHANGELOG.md (for each release)
-- README.md (contributors section)
-- Git commit history
-
----
+Maintainers release by pushing a version tag; the procedure is in [.github/RELEASE.md](.github/RELEASE.md).
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the MIT License.
+By contributing, you agree that your contributions are licensed under the MIT License.

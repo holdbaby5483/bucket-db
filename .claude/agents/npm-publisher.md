@@ -17,10 +17,12 @@ tools: Bash, Read, Edit, Grep, Glob
 | 推送 main + tag | 本地 | agent 执行 |
 | **实际构建 + publish + GitHub Release** | **GitHub Actions**（`.github/workflows/publish.yml`） | 推送 `v*.*.*` tag 时自动触发 |
 
-**关键事实**：
-- CI workflow 监听 tag push，格式必须是 `v*.*.*`（例如 `v0.3.1`）
+**关键事实**（完整发布手册见 [`.github/RELEASE.md`](../../.github/RELEASE.md)，以它为准）：
+- CI workflow 监听 tag push，格式必须是 `v*.*.*`（例如 `v0.6.0`）
 - CI 在 workflow 内会用 `sed` 将 `packages/core/package.json` 的 version 覆盖为 tag 名，所以本地 commit 里的 version 字段主要是为了历史可追溯，并非强制必须与 tag 一致（但强烈建议一致）
-- CI 使用 `secrets.NPM_TOKEN` 做 npm 认证，本地不需要 `npm login`
+- 认证走 npm trusted publishing（GitHub OIDC，附带 provenance），仓库里没有也不需要任何 npm 令牌；本地不需要 `npm login`
+- 版本号含 `-`（例如 `v0.7.0-beta.0`）时以 `next` dist-tag 发布并标记为 GitHub prerelease，不会成为 `latest`
+- GitHub Release 的说明取自 `CHANGELOG.md` 中 `## [x.y.z]` 那一节；没有这一节，Release 说明就是空的
 
 ## 职责范围
 
@@ -82,14 +84,17 @@ git log <last-tag>..HEAD --oneline -- packages/core
 
 ### Step 3：本地预验证（在 bump 版本之前）
 
-CI 里会构建 + 发布，但**失败成本高**（触发 workflow 后 tag 已经 push 出去了，回滚麻烦）。本地先跑一遍同样的命令提前暴露问题：
+CI 里会构建 + 发布，但**失败成本高**（触发 workflow 后 tag 已经 push 出去了，回滚麻烦）。本地先跑一遍 `publish.yml` 里的同样检查提前暴露问题：
 
 ```bash
 # 3.1 构建（与 CI 里 "Build packages" 步骤相同）
 ALLOW_HEAVY=1 rtk summary bun run --cwd packages/core build
 
-# 3.2 测试
-ALLOW_HEAVY=1 rtk test bun test packages/core
+# 3.2 测试（与 CI 相同，跑整个 workspace）
+ALLOW_HEAVY=1 rtk test bun test
+
+# 3.2b 体积和依赖门禁
+packages/core/scripts/check-budget.sh
 
 # 3.3 dry-run 检查 tarball 内容（验证 files 字段正确、dist 在包里）
 cd packages/core && npm publish --dry-run --access public 2>&1 | tail -20
@@ -97,27 +102,15 @@ cd packages/core && npm publish --dry-run --access public 2>&1 | tail -20
 
 **验收标准**：
 - 构建成功
-- 所有测试通过
+- 所有测试通过，`check-budget.sh` 全部 ok
 - dry-run tarball **必须包含 `dist/`** 目录
 - dry-run 不能显示向 `registry.npmmirror.com` 发布（应指向 `registry.npmjs.org`）
 
 任何一项失败 → **立即停止**，向用户报告。**禁止**自动修复代码或降级处理。
 
-### Step 4：Bump 版本并提交
+### Step 4：准备版本并提交
 
-```bash
-# 不自动创建 tag（tag 由 Step 6 手动创建）
-cd packages/core && npm version <new-version> --no-git-tag-version
-```
-
-或者直接 Edit `packages/core/package.json` 的 `version` 字段（二选一）。
-
-提交：
-
-```bash
-git add packages/core/package.json
-git commit -m "chore(core): release v<new-version>"
-```
+按 [RELEASE.md](../../.github/RELEASE.md) 第 1 步：改 `packages/core/package.json` 的 `version`，在 `CHANGELOG.md` 新增 `## [x.y.z] - YYYY-MM-DD` 一节。提交信息沿用历史惯例，例如 `docs: 0.6.0`。
 
 ### Step 5：推送 main
 
@@ -133,13 +126,7 @@ git push origin main
 
 ### Step 6：创建并推送 tag（真正触发发布）
 
-```bash
-# 创建 annotated tag（必须是 v*.*.* 格式才能匹配 workflow 触发条件）
-git tag -a v<new-version> -m "Release @hold-baby/bucket-db v<new-version>"
-
-# 推送 tag（这一步会触发 CI/CD publish workflow）
-git push origin v<new-version>
-```
+按 [RELEASE.md](../../.github/RELEASE.md) 第 2 步打 annotated tag（`v<new-version>`）并 `git push origin v<new-version>`，这一步触发 publish workflow。
 
 ### Step 7：监控 CI workflow
 
@@ -157,20 +144,14 @@ gh run watch
 
 ### Step 8：验证发布成功
 
+按 [RELEASE.md](../../.github/RELEASE.md)「验证发布」一节检查 dist-tags 和 `npx` 运行，再确认 GitHub Release：
+
 ```bash
-# 验证 npm 上的版本（用官方 registry 避免镜像滞后）
-npm view @hold-baby/bucket-db version --registry https://registry.npmjs.org/
-
-# 验证 dist 真的在 tarball 里（防止 0.3.0 那种 packaging bug 复发）
-npm view @hold-baby/bucket-db@<new-version> dist.tarball --registry https://registry.npmjs.org/
-
-# GitHub Release 是否已创建
 gh release view v<new-version>
 ```
 
 向用户汇报：
-- ✅ npm 版本号
-- ✅ tarball URL（可选检查解压后有无 dist/index.js）
+- ✅ npm 版本号及其 dist-tag（`latest` 或 `next`）
 - ✅ GitHub Release URL
 - 🔗 https://www.npmjs.com/package/@hold-baby/bucket-db
 
@@ -203,5 +184,5 @@ gh release view v<new-version>
 | dry-run tarball 缺 dist/ | `files` 字段缺失，npm fallback 到 `.gitignore` 排除 dist | 检查 `packages/core/package.json` 是否有 `"files": ["dist", ...]` |
 | dry-run 指向 npmmirror.com | 全局 `.npmrc` 配置镜像 | `packages/core/package.json` 应设 `"publishConfig": { "registry": "https://registry.npmjs.org/" }` |
 | tag push 后 workflow 没跑 | tag 格式不对 | 必须 `v*.*.*`，不能 `0.3.1` 或 `release-0.3.1` |
-| CI 报 NPM_TOKEN empty | secret 未配置 | 停下来让用户在 GitHub repo settings 补配 |
+| CI publish 报 E404 Not Found | trusted publisher 配置不对（仓库、`publish.yml` 文件名或 `id-token: write` 权限），npm 对认证失败返回 404 | 停下来让用户按 RELEASE.md「认证」一节检查 npm 上的 trusted publisher 配置 |
 | CI publish 时 409 conflict | 该版本号已发过 | 停下来让用户决定换版本号或 deprecate 重发 |

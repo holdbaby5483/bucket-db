@@ -11,8 +11,8 @@
 
 2. **打 tag 并推送**
    ```bash
-   git tag -a v0.5.1 -m v0.5.1
-   git push origin v0.5.1
+   git tag -a vX.Y.Z -m vX.Y.Z
+   git push origin vX.Y.Z
    ```
 
 3. **工作流自动执行**

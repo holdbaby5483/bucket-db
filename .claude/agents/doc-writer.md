@@ -20,9 +20,9 @@ tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch
 | `CHANGELOG.md` | 版本变更记录 | ✅（只追加，不重写历史） |
 | `CONTRIBUTING.md` | 贡献指南 | ✅ |
 | `docs/API.md` | **API 文档的唯一权威源** | ✅ |
-| `docs/FileSystemAdapter.md` | FS adapter 设计说明 | ✅ |
+| `docs/GUARANTEES.md` / `CLI.md` / `STORAGE-FORMAT.md` / `BENCHMARKS.md` / `COMPATIBILITY.md` / `MIGRATION-*.md` | 各主题的唯一权威源（保证与限制 / CLI / 存储格式 / 数字 / 兼容性 / 升级），其他文档只链接不复述 | ✅ |
 | `apps/website/index.md` | 文档站首页（VitePress home layout） | ✅ |
-| `apps/website/guide/*.md` | 教程指南（installation/concepts/queries/error-handling/mcp） | ✅ |
+| `apps/website/guide/*.md` | 教程指南（installation/concepts/queries/error-handling/guarantees/storage-format/cli/ci/mcp/migration/compatibility） | ✅ |
 | `apps/website/examples/*.md` | 示例文档 | ✅ |
 | `apps/website/api/*.md` | **由 `docs/API.md` 自动生成** | ❌ 禁止直接编辑 |
 | `apps/website/DEPLOYMENT.md` | 部署内部说明 | ✅ |
@@ -30,15 +30,15 @@ tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch
 ### 🚨 关键约束：API 文档的生成链路
 
 ```
-docs/API.md  ──[apps/website/scripts/sync-api-docs.ts]──►  apps/website/api/*.md + public/llms.txt
+docs/API.md  ──[apps/website/scripts/sync-api-docs.ts]──►  apps/website/api/*.md
 ```
 
 - 改 API 文档**只能改 `docs/API.md`**，website 下的 api/*.md 会被 build 时覆盖
 - 改完 `docs/API.md` 后必须在本地跑一遍 sync 脚本或 build 验证：
   ```bash
-  bun run --cwd apps/website scripts/sync-api-docs.ts
+  bun run --cwd apps/website sync
   ```
-- `packages/core/llms.txt` 是独立维护的，不在 sync 脚本范围内，需要人工保持与 API.md 一致
+- `packages/core/llms.txt` 是独立维护的，sync 脚本只把它原样复制到 `apps/website/public/llms.txt`，需要人工保持与 API.md 一致
 
 ## 审计维度（5 个）
 
@@ -77,8 +77,8 @@ docs/API.md  ──[apps/website/scripts/sync-api-docs.ts]──►  apps/websit
 - [ ] 签名是否与 `packages/core/src/**/*.ts` 的实际类型一致
 - [ ] 示例代码能否直接跑通（拼写、import、await）
 - [ ] 错误类是否有专门的章节说明何时抛出
-- [ ] 查询操作符（$eq/$gt/$in/$and 等）是否有完整列表和示例
-- [ ] 类型定义（Document、QueryFilter 等）是否与 `packages/core/src/types/index.ts` 一致
+- [ ] 查询操作符（`$eq/$ne/$gt/$gte/$lt/$lte/$in/$nin`）是否有完整列表和示例
+- [ ] 类型定义（Document、QueryFilter 等）是否与 `packages/core/src/types.ts` 一致（公开导出以 `packages/core/src/index.ts` 为准）
 
 ### 维度 3：教程指南体验（apps/website/guide/*）
 
@@ -92,8 +92,8 @@ docs/API.md  ──[apps/website/scripts/sync-api-docs.ts]──►  apps/websit
 
 检查清单：
 - [ ] installation 是否覆盖 Bun / Node / pnpm / yarn 多个运行时
-- [ ] concepts 是否解释了 collection / document / shard 这几个核心概念
-- [ ] queries 是否列全了所有支持的操作符（交叉比对 `packages/core/src/query/`）
+- [ ] concepts 是否解释了 collection / document / snapshot 这几个核心概念
+- [ ] queries 是否列全了所有支持的操作符（交叉比对 `packages/core/src/query.ts`）
 - [ ] error-handling 是否说清每个错误类对应的修复动作
 - [ ] mcp 是否有环境变量表 + Claude Desktop / Cursor 的配置示例
 
@@ -132,10 +132,10 @@ grep '"description"' packages/core/package.json
 fd -e md . . -E node_modules -E dist -E .git -E .vitepress -x wc -w {} \;
 
 # 1.3 提取实际 API 签名（用于交叉比对 docs/API.md）
-rg "^\s*(async\s+)?(public\s+)?(\w+)\s*\(" packages/core/src/core/ packages/core/src/types/index.ts
+rg "^\s*(async\s+)?(public\s+)?(\w+)\s*\(" packages/core/src/bucket-db.ts packages/core/src/collection.ts packages/core/src/types.ts
 
 # 1.4 列出所有查询操作符的实际实现
-rg "case '\\\$" packages/core/src/query/
+rg "case '\\\$" packages/core/src/query.ts
 
 # 1.5 列出所有错误类
 rg "extends (Error|BucketDBError)" packages/core/src/
@@ -194,7 +194,7 @@ fd -e ts . examples/ -E node_modules
 
 - **批次化**：按主题分批 commit（比如"修复 API 签名一致性" / "补充 quick start"）
 - **最小化**：只改审计报告里指出的内容，不做"顺手优化"
-- **可验证**：改完 docs/API.md 后跑 `bun run --cwd apps/website scripts/sync-api-docs.ts`，确认生成文件同步
+- **可验证**：改完 docs/API.md 后跑 `bun run --cwd apps/website sync`，确认生成文件同步
 - **可追溯**：每个 commit 对应审计报告里的 1-N 条
 
 修改后必须：
@@ -203,13 +203,13 @@ fd -e ts . examples/ -E node_modules
 ALLOW_HEAVY=1 rtk summary bun run --cwd apps/website build
 
 # 跑一遍 sync 确保 api/*.md 与 API.md 一致
-bun run --cwd apps/website scripts/sync-api-docs.ts
+bun run --cwd apps/website sync
 ```
 
 ## 写作风格指南
 
 ### 通用
-- **语言**：中文为主（项目主语言），代码注释可用英文
+- **语言**：`docs/`、`packages/core/README.md`、`CONTRIBUTING.md` 用英文；文档站（`apps/website`）用中文，作为 `docs/` 的中文镜像；代码注释可用英文
 - **人称**：用"你"而不是"我们" / "用户"
 - **时态**：现在时为主（"BucketDB 将数据存储在..."而非"BucketDB 会把数据存储在..."）
 - **段落**：每段 3-5 行，避免长段落
@@ -264,5 +264,5 @@ bun run --cwd apps/website scripts/sync-api-docs.ts
 | sync 脚本报错 | `apps/website/scripts/sync-api-docs.ts` 依赖 `docs/API.md` 结构，不要破坏章节标题 |
 | 版本号在 3 处对不上 | package.json 是源头，config.ts 和 CHANGELOG 跟随 |
 | 示例代码跑不通 | 没 `await`、缺 import、adapter 构造参数过期 |
-| guide 里的查询操作符不全 | 实际支持的要看 `packages/core/src/query/` 的 evaluator |
+| guide 里的查询操作符不全 | 实际支持的要看 `packages/core/src/query.ts` 的 evaluator |
 | README 太长没人读 | 拆分：README 只留首屏 + 一个 demo + 链接到 guide |

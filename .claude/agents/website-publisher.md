@@ -13,7 +13,7 @@ tools: Bash, Read, Edit, Grep, Glob, WebFetch
 - **构建器**：VitePress
 - **托管**：Cloudflare Pages（配置见 `apps/website/DEPLOYMENT.md`）
 - **触发方式**：push 到 `main` 分支自动构建 + 部署
-- **构建时间**：约 2-3 分钟
+- **生成文件**：构建先跑 `sync`（`scripts/sync-api-docs.ts`），从 `docs/API.md` 重新生成 `api/*.md`。其中 `api/index.md` 被 git 跟踪，其余忽略；它首段的版本号写在生成器里，所以构建可能改动 `api/index.md`——要改版本号就改生成器，不要手改 `api/index.md`
 
 ## 发布流程（严格顺序，不可跳步）
 
@@ -38,12 +38,15 @@ grep -n "v[0-9]" apps/website/.vitepress/config.ts
 # 1.4 所有 md 里硬编码的版本号
 rg -n "v?[0-9]+\.[0-9]+\.[0-9]+" apps/website/ --type md
 
+# 1.4b api/index.md 的版本号来自生成器
+rg -n "BucketDB [0-9]+\.[0-9]+\.[0-9]+" apps/website/scripts/sync-api-docs.ts
+
 # 1.5 README 里的版本引用
 rg -n "v?[0-9]+\.[0-9]+\.[0-9]+" README.md packages/core/README.md
 ```
 
 **判定规则**：
-- package.json / npm / config.ts 三者必须完全一致
+- package.json / npm / config.ts / `sync-api-docs.ts` 四者必须完全一致
 - 历史 changelog 里列旧版本号是允许的
 - 任何非预期不一致 → 列入问题清单
 
@@ -110,7 +113,7 @@ fd -e md . apps/website/ -E node_modules -E .vitepress
 
 向用户展示审计报告后，**明确询问**："是否授权我修复以上 CRITICAL 问题？" 得到用户 OK 后再 Edit：
 
-- 允许 Edit 的文件：`apps/website/.vitepress/config.ts`、`apps/website/**/*.md`
+- 允许 Edit 的文件：`apps/website/.vitepress/config.ts`、`apps/website/scripts/sync-api-docs.ts`（仅限其中的版本号）、`apps/website/**/*.md`（生成的 `apps/website/api/*.md` 除外，改 `docs/API.md` 或生成器）
 - **禁止** Edit 的文件：`packages/core/package.json`、根 README.md、CHANGELOG.md（这些是源头或归档，不应被 publisher 修改）
 - 修复必须**最小化**：只改审计报告里指出的具体值，不做其他"顺手优化"
 
@@ -167,6 +170,7 @@ ALLOW_HEAVY=1 rtk summary bun run --cwd apps/website build
 **验收**：
 - 构建成功 → 继续
 - 构建失败 → **立即停止**，向用户报告错误。**禁止**自动修复代码
+- 构建后 `git status` 显示 `apps/website/api/index.md` 有改动 → 说明生成器与已提交的文件不一致，向用户汇报，经同意后把它一起提交
 
 可选的进一步验证（本地预览），仅在用户要求时才做：
 
@@ -189,7 +193,7 @@ git push origin main
 推送完成后，告诉用户：
 
 1. ✅ 已推送到 `origin/main`
-2. 📊 Cloudflare Pages 将自动构建部署（约 2-3 分钟）
+2. 📊 Cloudflare Pages 将自动构建部署
 3. 🔗 可在 Cloudflare Dashboard 查看部署进度
 4. 🌐 构建完成后访问文档站验证
 
@@ -225,4 +229,3 @@ git push origin main
 | 构建报错找不到模块 | 依赖未安装 | 提示用户运行 `bun install` |
 | sidebar 链接 404 | config.ts 路径拼写错 | 停下来让用户修复 |
 | `base` 路径异常 | `.vitepress/config.ts` base 配置 | 确认应为 `'/'` |
-| Cloudflare 构建超时 | 构建慢（正常 2-3 分钟） | 20 分钟以内都算正常 |
