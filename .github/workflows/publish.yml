@@ -10,16 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write  # 创建 GitHub Release 需要
+      id-token: write  # npm trusted publishing (OIDC) and provenance
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Trusted publishing needs Node >= 22.14 and npm >= 11.5.1
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Update npm
+        run: npm install -g npm@11
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -53,6 +58,8 @@ jobs:
           cd packages/core
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
 
+      # Authenticates through the npm trusted publisher configured for this
+      # repository and workflow; NPM_TOKEN is only a fallback.
       - name: Publish @hold-baby/bucket-db
         working-directory: packages/core
         run: npm publish --access public ${{ steps.version.outputs.PRERELEASE == 'true' && '--tag next' || '' }}

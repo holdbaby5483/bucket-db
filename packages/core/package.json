@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "bucket-db": "./dist/cli.js"
+    "bucket-db": "dist/cli.js"
   },
   "exports": {
     ".": {
