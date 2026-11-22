@@ -5,9 +5,11 @@ All notable changes to BucketDB will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.0] - 2026-11-21
+## [0.5.0] - 2026-11-22
 
 Makes BucketDB easier to reach for: a connection URL, a `bucket-db` CLI with `doctor`, `put`, `insert` with a chosen id, `sort`, `count` and `deleteMany`, and query semantics that are settled rather than inherited. The storage format is unchanged; 0.4 and 0.5 read and write the same collections. Upgrading from 0.4: [docs/MIGRATION-0.5.md](docs/MIGRATION-0.5.md).
+
+0.5.0 is the first release published to npm since 0.3.1: 0.3.2, 0.4.0-beta.0 and 0.4.0 below were never published, and their changes all ship in 0.5.0. Upgrading from 0.3.1, read the 0.4 migration guide ([docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md)) and then the 0.5 one.
 
 ### BREAKING
 
@@ -36,9 +38,9 @@ Makes BucketDB easier to reach for: a connection URL, a `bucket-db` CLI with `do
 - `find` validates `sort`, `limit` and `offset`, like the filter, before any storage request.
 - CI runs the built CLI on Node 20 and 22 (`put`, `count`, `export | import`, `get`, `doctor`, exit code 2). `npx` from a packed tarball with an empty cache was checked on Node.
 
-## [0.4.0] - 2026-11-21
+## [0.4.0] - 2026-11-21 (not published; included in 0.5.0)
 
-Adds the query snapshot: on S3 and OSS a `find` no longer downloads every document. Changes below are relative to 0.4.0-beta.0; upgrading from 0.3.x, read both entries and [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md). 0.4.0 is published as `latest`.
+Adds the query snapshot: on S3 and OSS a `find` no longer downloads every document. Changes below are relative to 0.4.0-beta.0; upgrading from 0.3.x, read both entries and [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md).
 
 ### Added
 
@@ -57,7 +59,7 @@ Adds the query snapshot: on S3 and OSS a `find` no longer downloads every docume
 - Consistency is stated explicitly: every document `find` returns is a committed version, but the result set is not a point-in-time snapshot of the collection. Deleted documents' contents remain in the snapshot until it is rewritten or `compact()` runs.
 - Installation: `npm install @hold-baby/bucket-db` (no `@next`).
 
-## [0.4.0-beta.0] - 2026-11-21
+## [0.4.0-beta.0] - 2026-11-21 (not published; included in 0.5.0)
 
 Rewrites the storage core. Each document is one object, `<dbPath>/<collection>/docs/<id>.json`, with no index and no write-ahead log; every write is a single storage request. The S3 / OSS client is built in, and the package has no runtime dependencies. 0.4 reads 0.3 collections without conversion. See [docs/MIGRATION-0.4.md](docs/MIGRATION-0.4.md) for the upgrade steps.
 
@@ -104,7 +106,7 @@ Rewrites the storage core. Each document is one object, `<dbPath>/<collection>/d
 - Concurrent writes on OSS no longer lose documents: with no index there is nothing to lose (0.3.2 lost index entries under concurrent inserts).
 - `update` with `etag` on OSS no longer appears to succeed while being unenforced; it throws `UnsupportedError`.
 
-## [0.3.2] - 2026-11-21
+## [0.3.2] - 2026-11-21 (not published; included in 0.5.0)
 
 Stops silent data loss in the index and stops the docs from over-promising. No API or storage format changes. 0.3.x remains suitable for a single writer only; see "Status and limitations" in the README.
 
