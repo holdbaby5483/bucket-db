@@ -1,6 +1,6 @@
 # 保证与限制
 
-适用于 0.6.0。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
+适用于 0.6.1。每一行都注明了检查它的测试。除非另写路径，测试文件位于 [`packages/core/tests/`](https://github.com/holdbaby5483/bucket-db/tree/main/packages/core/tests)；一致性测试套件（`conformance/adapter-suite.ts` "storage contract"、`conformance/collection-suite.ts` "collection"）会在[测试运行环境](#测试运行环境)中列出的每个后端上运行。
 
 ## 各后端
 
@@ -13,6 +13,8 @@
 | 查询结果与存储的文档一致 | 是 | 是 | 是 | 是 | Collection D4、D5、D7/D8、D13；`core/snapshot.test.ts`（见下文）。依赖 LIST 立即反映写入：storage contract A7 |
 
 所有后端都支持多个写入进程并发执行 `insert` 和 `delete`；S3 上还支持并发 `update`（Memory 和 FileSystem 限单进程内）。`core/multiprocess.test.ts` 运行 4 个进程各插入 25 个文档，检查全部 100 个文档可见，覆盖 FileSystem、模拟 S3、CI 中的本地 S3、真实 OSS 和真实 S3。
+
+所有失败都以库定义的错误类抛出。FileSystem 的 I/O 失败（只读目录、磁盘已满）为 `kind: 'permanent'` 的 `StorageError`：`conformance/fs.test.ts` 中的 "a put that cannot create the directory or the file throws StorageError"（0.6.1 修复；更早的版本中 `put` 会抛出原始的 Node 错误）。
 
 ## 集合操作
 

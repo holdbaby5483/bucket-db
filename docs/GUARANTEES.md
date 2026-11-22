@@ -1,6 +1,6 @@
 # Guarantees and Limits
 
-For 0.6.0. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
+For 0.6.1. Each row names the test that checks it. Test files live in `packages/core/tests/` unless the path says otherwise; the conformance suites (`conformance/adapter-suite.ts` "storage contract", `conformance/collection-suite.ts` "collection") run against every backend listed under [Where the tests run](#where-the-tests-run).
 
 ## Per backend
 
@@ -13,6 +13,8 @@ For 0.6.0. Each row names the test that checks it. Test files live in `packages/
 | Query results match the stored documents | yes | yes | yes | yes | Collection D4, D5, D7/D8, D13; `core/snapshot.test.ts` (see below). Relies on LIST reflecting writes immediately: storage contract A7 |
 
 Multiple writer processes are supported for `insert` and `delete` on every backend, and for `update` on S3 (on Memory and FileSystem, within one process). `core/multiprocess.test.ts` runs 4 processes inserting 25 documents each and checks that all 100 are visible, on FileSystem, a fake S3, the local S3 in CI, real OSS and real S3.
+
+Every failure surfaces as one of the library's error classes. For FileSystem I/O (a read-only directory, a full disk) that is `StorageError` with `kind: 'permanent'`: `conformance/fs.test.ts`, "a put that cannot create the directory or the file throws StorageError" (fixed in 0.6.1; earlier versions threw the raw Node error from `put`).
 
 ## Collection operations
 

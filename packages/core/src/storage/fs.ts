@@ -92,10 +92,10 @@ export class FileSystemAdapter implements StorageAdapter {
   async put(key: string, body: Uint8Array, condition?: WriteCondition): Promise<{ etag: string }> {
     const path = this.pathOf(key);
     return this.withLock(path, async () => {
-      await mkdir(dirname(path), { recursive: true });
       const temp = `${path}.${randomUUID()}.tmp`;
-      await writeFile(temp, body, { flag: 'wx' });
       try {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(temp, body, { flag: 'wx' });
         // rename and link keep the inode and mtime, so this is the etag of the stored object
         const etag = etagOf(await stat(temp, { bigint: true }));
         if (condition && 'ifNoneMatch' in condition) {
