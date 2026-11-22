@@ -1,6 +1,6 @@
 # BucketDB
 
-TypeScript document database (version 0.6.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 22 or Bun. Includes the `bucket-db` CLI.
+TypeScript document database (version 0.6.1). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 22 or Bun. Includes the `bucket-db` CLI.
 
 ## Key concepts
 
@@ -27,7 +27,7 @@ TypeScript document database (version 0.6.0). Uses AWS S3 / Alibaba Cloud OSS / 
 
 Multiple writer processes are supported for insert/put/delete on every backend and for update on S3 (Memory/FileSystem: within one process). put is last-writer-wins everywhere.
 
-## Limitations (0.6.0)
+## Limitations (0.6.x)
 
 - No transactions; each write touches one document. deleteMany is not atomic (one DELETE per match, 16 in parallel; a failure leaves earlier deletes done).
 - Envelope: at most 10,000 documents and 10 MB of snapshot per collection; past it the collection logs one `warn` and queries keep getting slower. Measured warm find at 10,000 docs: OSS 1.35 s, S3 3.2 s, FileSystem ~0.5 s; no snapshot at 10,000 docs: OSS 34 s, S3 134 s (docs/BENCHMARKS.md).

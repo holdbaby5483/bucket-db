@@ -7,8 +7,8 @@
 - **Node.js** 22+ 或 **Bun**（Node 20 已于 2026-04-30 停止维护，0.6 起不再支持）
 - **TypeScript** 5.0+（推荐）
 
-::: tip 0.6.0
-当前版本为 0.6.0，1.0 之前最后一个包含不兼容变更的版本：`Collection` 只导出类型、返回的文档类型为 `Stored<T>`、`sort` 字段做类型检查、要求 Node.js 22+。从 0.5、0.4 或 0.3.x 升级请阅读[升级指南](./migration)。
+::: tip 0.6
+当前版本为 0.6.1。0.6 是 1.0 之前最后一个包含不兼容变更的版本：`Collection` 只导出类型、返回的文档类型为 `Stored<T>`、`sort` 字段做类型检查、要求 Node.js 22+。从 0.5、0.4 或 0.3.x 升级请阅读[升级指南](./migration)。
 :::
 
 ## 包管理器
@@ -132,7 +132,7 @@ const oss = new OSSAdapter({
 - 缺少 `region`（参数和环境变量都没有）时，构造函数抛出 `ValidationError`。
 - 缺少凭证时，在第一次请求时抛出 `ValidationError`。
 - `credentials` 也可以是返回凭证的异步函数（`CredentialProvider`）。函数结果会被缓存，并在 `expiresAt` 前 5 分钟重新调用（没有 `expiresAt` 则不再调用）；调用失败不会被缓存。
-- endpoint 的主机是 IP 或 `localhost` 时自动使用 path-style 寻址（S3 可用 `forcePathStyle` 覆盖）。
+- endpoint 的主机是 IP 地址（IPv4 或 IPv6）或 `localhost` 时自动使用 path-style 寻址（S3 可用 `forcePathStyle` 覆盖）。
 - 请求失败时最多尝试 3 次（网络错误、超时、5xx、429、`SlowDown`、`RequestTimeout`），每次尝试的超时由 `timeoutMs` 控制，默认 10000 毫秒。
 
 ```typescript

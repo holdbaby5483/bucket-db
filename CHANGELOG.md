@@ -7,17 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1.0.0 is expected to have no API change from 0.6.0; what it adds is a promise.
+Planned as 1.0.0, once the dogfood dataset has passed 100 consecutive CI runs. 1.0.0 is expected to have no API change from 0.6.1; what it adds is the promise in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
-### Added
+## [0.6.1] - 2026-11-22
 
-- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): from 1.0, breaking changes to exports (including types), error classes and `StorageError.kind`, the storage adapter contract, the storage format, the CLI (commands, flags, output, exit codes), connection URLs and the documented guarantees only ship in a major release.
+### Fixed
+
+- `FileSystemAdapter.put` threw the raw Node error (`EACCES`, `ENOSPC`, …) when it could not create the directory or the temporary file, for example in a read-only directory or on a full disk. It now throws `StorageError` with `kind: 'permanent'` and the key, like every other FileSystem failure. New test in `conformance/fs.test.ts`.
 
 ### Documentation
 
-- `NO_PROXY` is honoured on Bun and on Node with `NODE_USE_ENV_PROXY=1` (measured).
-- The guarantees page records that the real S3 suite runs in CI.
-- API pages on the website no longer show a literal `&lt;` in headings.
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md): what is covered by semver from 1.0 (exports including types, error classes and `StorageError.kind`, the storage adapter contract, the storage format, the CLI, connection URLs and the documented guarantees) and what is not.
+- The npm README is shorter (544 to 243 lines), with Quick Start first; reference material links to [docs/API.md](docs/API.md), which gains an Exports section and the content of the removed `docs/FileSystemAdapter.md`. `docs/security/credentials.md` is in English and lists the `ALIBABA_CLOUD_*` fallback.
+- `NO_PROXY` is honoured on Bun and on Node with `NODE_USE_ENV_PROXY=1` (measured). Path-style addressing is documented as automatic for `localhost`, IPv4 and IPv6 literals.
+- The guarantees page records that the real S3 suite runs in CI. The website shows the current version everywhere, keeps the guarantee table on one page, and its samples compile against 0.6.
+- Finished planning documents moved to [docs/history/](docs/history/); CONTRIBUTING describes the current layout and checks.
 
 ## [0.6.0] - 2026-11-22
 

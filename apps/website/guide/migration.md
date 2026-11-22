@@ -5,7 +5,7 @@
 0.6.0 是 1.0 之前最后一个包含不兼容变更的版本，只收紧公开类型并提高 Node.js 最低版本。**存储格式、命令行、连接字符串、MCP 服务器和运行时行为都没有变化**，0.5 和 0.6 可以读写同一个集合。完整说明见 [MIGRATION-0.6.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/MIGRATION-0.6.md)。
 
 ```bash
-npm install @hold-baby/bucket-db@0.6.0
+npm install @hold-baby/bucket-db@0.6
 ```
 
 **受影响的代码**：调用 `new Collection(...)`、导入 `CollectionOptions` 或把 `Collection` 当作值使用（`instanceof`）的代码；按文档类型中未声明的字段排序的代码；运行在 Node.js 20 上的应用和 CI。只使用 `BucketDB`、`db.collection<T>(name)` 和带类型文档的代码无需修改。
@@ -102,7 +102,7 @@ const options: QueryOptions<User> = { sort: { age: -1 }, limit: 10 };
 不需要转换数据。
 
 1. **停止所有 0.3 写入进程**。0.3 只读取自己的索引，看不到后续版本的写入，不能与 0.4 及以后的版本同时写入同一集合。
-2. 升级到 `@hold-baby/bucket-db@0.6.0`，按上面三节修改代码。
+2. 升级到 `@hold-baby/bucket-db@0.6`，按上面三节修改代码。
 3. 启动新客户端。
 4. （可选）删除 0.3 遗留的 `index/`、`wal/` 目录和 `docs/*.meta` 文件。新版本会忽略它们，删除只是为了节省存储空间。
 

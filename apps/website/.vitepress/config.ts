@@ -14,7 +14,7 @@ export default defineConfig({
       { text: 'API', link: '/api/' },
       { text: '示例', link: '/examples/' },
       {
-        text: 'v0.6.0',
+        text: 'v0.6.1',
         items: [
           { text: 'GitHub', link: 'https://github.com/holdbaby5483/bucket-db' },
           { text: 'Changelog', link: 'https://github.com/holdbaby5483/bucket-db/releases' },
