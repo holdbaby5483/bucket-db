@@ -1,11 +1,15 @@
 name: Dogfood
 
-# This repository's own use of BucketDB: every push to main records benchmark
-# results per commit and runtime into a collection on OSS, through the built
-# CLI, and checks that every job's record is readable by the others.
+# This repository's own use of BucketDB: on every push to main and every four
+# hours, each runtime records benchmark results into a collection on OSS
+# through the built CLI, and a final job checks that every record is readable.
+# 1.0 requires 100 consecutive successful runs (ROADMAP §4 M3).
 on:
   push:
     branches: [main]
+  schedule:
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -54,17 +58,18 @@ jobs:
       - name: Benchmark the filesystem backend
         run: bun packages/core/bench/run.ts fs 100,1000 --json > bench.json
 
+      # Keyed by run, so repeated runs of one commit (schedule) do not overwrite each other.
       - name: Record the result
         run: |
           jq -c --arg sha "$GITHUB_SHA" --arg runtime "${{ matrix.runtime }}" --arg run "$GITHUB_RUN_ID" \
             '{sha: $sha, runtime: $runtime, run: $run, results: .}' bench.json \
-            | ${{ matrix.cli }} put benchmarks "$GITHUB_SHA-${{ matrix.runtime }}"
+            | ${{ matrix.cli }} put benchmarks "$GITHUB_RUN_ID-${{ matrix.runtime }}"
 
       - name: Read it back
         run: |
-          ${{ matrix.cli }} get benchmarks "$GITHUB_SHA-${{ matrix.runtime }}" | jq -e --arg sha "$GITHUB_SHA" '.sha == $sha'
-          echo "Records for this commit so far:"
-          ${{ matrix.cli }} find benchmarks "{\"sha\":\"$GITHUB_SHA\"}" | jq -r '.[].runtime'
+          ${{ matrix.cli }} get benchmarks "$GITHUB_RUN_ID-${{ matrix.runtime }}" | jq -e --arg run "$GITHUB_RUN_ID" '.run == $run'
+          echo "Records for this run so far:"
+          ${{ matrix.cli }} find benchmarks "{\"run\":\"$GITHUB_RUN_ID\"}" | jq -r '.[].runtime'
 
   verify:
     name: Every job's record is visible
@@ -89,11 +94,19 @@ jobs:
 
       - name: Check the records
         run: |
-          count=$(node packages/core/dist/cli.js count benchmarks "{\"sha\":\"$GITHUB_SHA\"}")
-          echo "records for $GITHUB_SHA: $count"
+          count=$(node packages/core/dist/cli.js count benchmarks "{\"run\":\"$GITHUB_RUN_ID\"}")
+          echo "records for run $GITHUB_RUN_ID: $count"
           test "$count" -eq 3
 
       - name: Recent history
         run: |
           node packages/core/dist/cli.js find benchmarks '{"runtime":"node22"}' --sort _createdAt:desc --limit 10 \
-            | jq -r '.[] | [.sha[0:7], (.results[] | select(.documents == 1000 and .operation == "find, current snapshot") | .ms)] | @tsv'
+            | jq -r '.[] | [._createdAt[0:16], .sha[0:7], (.results[] | select(.documents == 1000 and .operation == "find, current snapshot") | .ms)] | @tsv'
+
+      # Keeps the collection well inside the envelope: about 18 records a day, 30 days kept.
+      - name: Delete records older than 30 days
+        run: |
+          cutoff=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          node packages/core/dist/cli.js find benchmarks "{\"_createdAt\":{\"\$lt\":\"$cutoff\"}}" | jq -r '.[].id' \
+            | while read -r id; do node packages/core/dist/cli.js delete benchmarks "$id"; done
+          echo "records kept: $(node packages/core/dist/cli.js count benchmarks)"
