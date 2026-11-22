@@ -5,20 +5,26 @@ Complete API documentation for BucketDB v0.6.0. Requires Node.js >= 22 or Bun. U
 ## Table of Contents
 
 - [Status and Limitations](#status-and-limitations)
+- [Exports](#exports)
 - [Core Classes](#core-classes)
   - [BucketDB](#bucketdb) (including [connection URLs](#connection-urls))
-  - [Collection](#collectiont)
+  - [Collection](#collection)
 - [Storage Adapters](#storage-adapters)
   - [MemoryStorageAdapter](#memorystorageadapter)
   - [FileSystemAdapter](#filesystemadapter)
   - [S3Adapter](#s3adapter)
   - [OSSAdapter](#ossadapter)
+  - [Credentials](#credentials)
   - [Custom adapters](#custom-adapters)
 - [Type Definitions](#type-definitions)
 - [Error Classes](#error-classes)
 - [Query Operators](#query-operators)
+- [Advanced Patterns](#advanced-patterns)
 - [Performance and Cost Model](#performance-and-cost-model)
   - [Query snapshot](#query-snapshot)
+  - [Choosing an Adapter](#choosing-an-adapter)
+  - [When BucketDB fits](#when-bucketdb-fits)
+- [Upgrading and Compatibility](#upgrading-and-compatibility)
 
 ---
 
@@ -33,18 +39,71 @@ BucketDB stores each document as one object, `<dbPath>/<collection>/docs/<id>.js
 | Conditional update (`etag`) | yes | single process only | yes | no — `UnsupportedError` |
 | Concurrent partial updates all apply | yes | single process | yes | no (last writer wins) |
 
-Multiple writer processes are supported for `insert` and `delete` on every backend, and for `update` on S3 (on Memory and FileSystem, within one process). In a test, 4 processes each inserting 25 documents left all 100 visible on FileSystem, S3 and OSS. [GUARANTEES.md](./GUARANTEES.md) names the test behind each guarantee.
+Multiple writer processes are supported for `insert`, `put` and `delete` on every backend, and for `update` on S3 (on Memory and FileSystem, within one process). In a test, 4 processes each inserting 25 documents left all 100 visible on FileSystem, S3 and OSS.
 
-Remaining limits:
+The main limits: there are no transactions (each write touches one document, and `deleteMany` is not atomic); a collection is meant to hold at most 10,000 documents and 10 MB of snapshot (see [Performance and Cost Model](#performance-and-cost-model)); every query lists the whole collection and filters in memory; results are not a point-in-time snapshot. The complete list of limits, and the test behind each guarantee, is in [GUARANTEES.md](./GUARANTEES.md#limits).
 
-1. **No transactions.** Each write touches one document. `deleteMany` deletes its matches one by one; a failure halfway leaves the earlier deletes done.
-2. **Envelope: at most 10,000 documents and 10 MB of snapshot per collection.** Past either, queries keep working but get slower, and the collection logs one warning. Measured at 10,000 documents: a `find` takes 1.35 s on OSS, 3.2 s on S3 and about 0.5 s on FileSystem ([BENCHMARKS.md](./BENCHMARKS.md)). See [Performance and Cost Model](#performance-and-cost-model).
-3. **Queries list the whole collection.** `find` filters, sorts and pages in memory; `sort`, `limit` and `offset` do not reduce reads. Only a `{ id: '...' }` filter reads a single document, and only `count()` without a filter skips reading documents.
-4. **Results are not a point-in-time snapshot.** Every returned document is a version that was committed, but documents written while a query runs may or may not be included.
-5. **The snapshot holds document contents.** A deleted document's contents remain in the snapshot until it is rewritten or [`compact()`](#compact-promisevoid) runs.
-6. **OSS has no conditional update.** `update` with `etag` throws `UnsupportedError`; concurrent `update`s without `etag` are last-writer-wins.
-7. **FileSystem conditional updates are single-process.** `etag` checks and the merging of concurrent `update`s hold only among writers in one process.
-8. **0.3.x and 0.4 must not write the same collection concurrently.** 0.3 reads only its own index and does not see 0.4 writes.
+---
+
+## Exports
+
+Everything is exported from the package root; [`packages/core/src/index.ts`](../packages/core/src/index.ts) is the source of truth.
+
+```typescript
+// Classes
+import {
+  BucketDB,
+  MemoryStorageAdapter,
+  FileSystemAdapter,
+  S3Adapter,
+  OSSAdapter,
+} from '@hold-baby/bucket-db';
+
+// Error classes
+import {
+  BucketDBError,
+  ValidationError,
+  DocumentNotFoundError,
+  DocumentExistsError,
+  ConcurrentUpdateError,
+  UnsupportedError,
+  StorageError,
+} from '@hold-baby/bucket-db';
+
+// Types. Collection is a type only: get collections from db.collection(name)
+import type {
+  Collection,
+  BucketDBOptions,
+  Logger,
+  LogEvent,
+  Document,
+  Stored,
+  InsertDocument,
+  UpdateDocument,
+  QueryOperator,
+  QueryValue,
+  QueryFilter,
+  QueryOptions,
+  SortSpec,
+  InsertOptions,
+  UpdateOptions,
+  FileSystemAdapterConfig,
+  S3AdapterOptions,
+  OSSAdapterOptions,
+  Credentials,
+  CredentialProvider,
+  StorageErrorKind,
+  StorageErrorOptions,
+  // for custom adapters
+  StorageAdapter,
+  Capabilities,
+  Guarantee,
+  WriteCondition,
+  ObjectEntry,
+  ListPage,
+  ListOptions,
+} from '@hold-baby/bucket-db';
+```
 
 ---
 
@@ -399,12 +458,7 @@ All adapters implement the `StorageAdapter` interface. They declare which write 
 | `S3Adapter` | `atomic` | `atomic` | yes | 3 attempts |
 | `OSSAdapter` | `atomic` (`x-oss-forbid-overwrite`; not enforced on versioned buckets) | `none` | yes | 3 attempts |
 
-| | Memory | FileSystem | S3 | OSS |
-|---|---|---|---|---|
-| Single write is atomic | yes | yes | yes | yes |
-| Create-if-absent (`insert`) | yes | yes (across processes) | yes | yes (non-versioned buckets only) |
-| Conditional update (`etag`) | yes | single process only | yes | no — `UnsupportedError` |
-| Concurrent partial updates all apply | yes | single process | yes | no (last writer wins) |
+What these capabilities mean for each `Collection` operation is the guarantee table in [Status and Limitations](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md#status-and-limitations).
 
 **Retries (`S3Adapter`, `OSSAdapter`):** up to 3 attempts per request with full-jitter exponential backoff, on network errors, timeouts (`timeoutMs` per attempt, default 10 s), 500 / 502 / 503 / 504, 429, `SlowDown` and `RequestTimeout`. Other 4xx responses are not retried and become `StorageError` with `kind: 'permanent'`; a retryable failure that persists becomes `kind: 'transient'`. If a conditional write receives a conflict after a transient failure, the adapter reads the object back and compares the bytes, so an earlier attempt that actually succeeded is not reported as a conflict.
 
@@ -459,9 +513,18 @@ basePath/
         {id}.json            # One file per document
 ```
 
-Every write first goes to a temporary file (`{id}.json.<uuid>.tmp`), which is then linked into place (create, atomic across processes) or renamed over the old file (replace). Readers never see a partial file. The etag is derived from the file's inode, modification time and size. `etag` checks are serialized by a lock inside the process, so they hold only among writers in one process. Temporary files and 0.3's `*.meta` files are never treated as documents.
+Every write first goes to a temporary file (`{id}.json.<uuid>.tmp`), which is then linked into place (create, atomic across processes) or renamed over the old file (replace). Readers never see a partial file. The etag is derived from the file's inode, modification time (in nanoseconds) and size; because every write creates a new file, the etag changes on every write, even when the bytes are the same. Temporary files and 0.3's `*.meta` files are never treated as documents.
 
-See [FileSystemAdapter.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/FileSystemAdapter.md) for details.
+With several processes writing to the same `basePath`:
+
+| Operation | Across processes |
+|---|---|
+| `insert` | Safe: `link()` fails when the file already exists, whichever process created it |
+| `put`, `delete` | Safe; concurrent `put`s to one ID are last-writer-wins, as on every backend |
+| `update` with `etag` | The check is serialized by a lock inside the process, so it holds only among writers in one process; a conflicting write from another process may go undetected |
+| `update` without `etag` | Concurrent updates within one process all apply (conflicts are retried); across processes one may overwrite another |
+
+In a test, 4 processes each inserting 25 documents left all 100 visible. The data is plain files: back it up by copying `basePath`, or with `bucket-db export`.
 
 ---
 
@@ -489,7 +552,7 @@ interface S3AdapterOptions {
 - `region?` - Default: `AWS_REGION`, then `AWS_DEFAULT_REGION`. Missing region throws `ValidationError`.
 - `endpoint?` - Default: `AWS_ENDPOINT_URL_S3`, then `AWS_ENDPOINT_URL`, then `https://s3.<region>.amazonaws.com`
 - `credentials?` - Default: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`. See [Credentials](#credentials).
-- `forcePathStyle?` - Default: `true` when the endpoint host is an IP address or `localhost`, otherwise virtual-hosted-style
+- `forcePathStyle?` - Default: `true` when the endpoint host is `localhost` or an IP address (IPv4, or IPv6 such as `[::1]`), otherwise virtual-hosted-style
 - `timeoutMs?` - Per-attempt timeout; default `10000`
 
 **Example:**
@@ -578,7 +641,7 @@ interface Credentials {
 type CredentialProvider = () => Promise<Credentials>;
 ```
 
-A provider's result is cached and requested again 5 minutes before `expiresAt`; without `expiresAt` it is called once. A failed call is not cached; the next request calls the provider again. When the option is omitted, credentials are read from the environment on the first request, and missing variables throw `ValidationError` then.
+A provider's result is cached and requested again 5 minutes before `expiresAt`; without `expiresAt` it is called once. A failed call is not cached; the next request calls the provider again. When the option is omitted, credentials are read from the environment on the first request, and missing variables throw `ValidationError` then. The built-in client does not read `~/.aws/credentials`, instance metadata or container credential endpoints; fetch those in a provider. How to source, scope and rotate credentials: [credentials guide](https://github.com/holdbaby5483/bucket-db/blob/main/docs/security/credentials.md).
 
 ```typescript
 const adapter = new S3Adapter({
@@ -646,7 +709,7 @@ Error contract (`StorageError` with `kind`):
 - `delete` of a missing key: no error
 - a retryable failure that persisted: `transient`; anything else: `permanent`
 
-`Collection` uses `{ ifNoneMatch: '*' }` for `insert` unless `createIfAbsent` is `'none'`, and `{ ifMatch }` for `update` unless `compareAndSwap` is `'none'`. `MemoryStorageAdapter` (`packages/core/src/storage/memory.ts`) is a complete reference implementation in about 50 lines.
+`Collection` uses `{ ifNoneMatch: '*' }` for `insert` unless `createIfAbsent` is `'none'`, and `{ ifMatch }` for `update` unless `compareAndSwap` is `'none'`. `MemoryStorageAdapter` (`packages/core/src/storage/memory.ts`) is a complete reference implementation.
 
 **`remote`:** set `readonly remote = true` when each request is a network round trip (as `S3Adapter` and `OSSAdapter` do). `find` then keeps `<dbPath>/<collection>/_snapshot.v1.json` and GETs only the documents whose listed etag differs from the snapshot's, and `compact()` rebuilds it. This relies on the etag contract above: `list` must report, for every key, the same etag `get` returns for the current version, and must reflect completed writes and deletes immediately. Leave `remote` unset (or `false`) for local backends; every `find` then reads every document and `compact()` does nothing.
 
@@ -669,7 +732,7 @@ interface Document {
 
 All collection documents must extend this interface. `id` comes from the object key and `_etag` from the storage service; neither is stored in the document body. Documents returned by a collection have the type `Stored<T>`, in which `_etag` is always set.
 
-### Stored<T>
+### `Stored<T>`
 
 A document as returned by `insert`, `put`, `findById`, `find` and `update`.
 
@@ -679,7 +742,7 @@ type Stored<T extends Document> = T & { _etag: string };
 
 `_etag` is always set, so it can be passed to `update(id, data, { etag: doc._etag })` without a non-null assertion. `_createdAt` and `_updatedAt` stay optional: a file placed in `docs/` by other means may lack them.
 
-### InsertDocument<T>
+### `InsertDocument<T>`
 
 Type for inserting new documents (omits system fields).
 
@@ -687,7 +750,7 @@ Type for inserting new documents (omits system fields).
 type InsertDocument<T extends Document> = Omit<T, 'id' | '_etag' | '_createdAt' | '_updatedAt'>;
 ```
 
-### UpdateDocument<T>
+### `UpdateDocument<T>`
 
 Type for updating documents: a partial document without system fields.
 
@@ -695,7 +758,7 @@ Type for updating documents: a partial document without system fields.
 type UpdateDocument<T extends Document> = Partial<Omit<T, 'id' | '_etag' | '_createdAt' | '_updatedAt'>>;
 ```
 
-### QueryFilter<T>
+### `QueryFilter<T>`
 
 Query filter for type-safe queries.
 
@@ -705,7 +768,7 @@ type QueryFilter<T> = {
 };
 ```
 
-### QueryValue<T>
+### `QueryValue<T>`
 
 Query value can be a direct value or an operator object.
 
@@ -730,7 +793,7 @@ type QueryValue<T> =
 type QueryOperator = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$nin';
 ```
 
-### QueryOptions<T>
+### `QueryOptions<T>`
 
 Sorting and pagination for `find`. `T` defaults to `Document`; `find` on a `Collection<T>` takes `QueryOptions<T>`.
 
@@ -749,7 +812,7 @@ interface QueryOptions<T = Document> {
 
 `limit` and `offset` must be non-negative integers. See `find` for the ordering rules.
 
-### SortSpec<T>
+### `SortSpec<T>`
 
 The `sort` option of `find`.
 
@@ -1121,44 +1184,23 @@ On remote backends (`S3Adapter`, `OSSAdapter`, custom adapters with `remote: tru
 ### Choosing an Adapter
 
 - `MemoryStorageAdapter`: tests only; nothing is persisted.
-- `FileSystemAdapter`: one machine with a local disk. Inserts and deletes from several processes are safe; `etag` updates only within one process.
+- `FileSystemAdapter`: one machine with a local disk. Inserts, `put`s and deletes from several processes are safe; `etag` updates only within one process.
 - `S3Adapter`: cloud storage with every guarantee in the table, including `etag` optimistic locking across processes.
 - `OSSAdapter`: Alibaba Cloud OSS; no conditional update.
 
+### When BucketDB fits
+
+- **Small collections**: up to 10,000 documents and 10 MB per collection, at a few writes per second.
+- **Schema-flexible documents** looked up by ID or filtered in memory.
+- **Deployments that already use object storage** and want to avoid running a database server.
+
+It does not fit large collections or selective queries over many documents (there are no indexes; every query lists the whole collection), write-heavy workloads, multi-document transactions, joins or aggregations.
+
 ---
 
-## Migration Guide
+## Upgrading and Compatibility
 
-### From 0.5
-
-See [MIGRATION-0.6.md](./MIGRATION-0.6.md): `Collection` is a type only (no `new Collection`, no `CollectionOptions`), returned documents are `Stored<T>`, `sort` keys are type-checked, and Node.js 22 or later is required. The storage format and runtime behaviour did not change.
-
-### From 0.4
-
-See [MIGRATION-0.5.md](./MIGRATION-0.5.md): query semantics for missing fields and mismatched types, the default `find` order, `limit: 0`, and the MCP server's configuration changed. The storage format did not.
-
-### From 0.3.x
-
-See [MIGRATION-0.4.md](./MIGRATION-0.4.md). Data written by 0.3 is read as-is; the API changes are listed there with before/after code.
-
-### From Other Databases
-
-BucketDB fits:
-- **Small collections** (up to 10,000 documents and 10 MB per collection; see [Performance and Cost Model](#performance-and-cost-model))
-- **Low write rates** (a few writes per second)
-- **Schema-flexible** document storage
-- **Deployments that already use object storage** and want to avoid running a database server
-
-**Not suitable for:**
-- Large collections or selective queries over many documents (there are no indexes; every query lists the whole collection)
-- Write-heavy workloads
-- Multi-document transactions or strong consistency across documents
-- Complex joins or aggregations
-- Real-time analytics
-
-### Version Compatibility
-
-BucketDB follows semantic versioning:
-- **v0.x** - Early-stage; API may change between minor versions
-- **v1.0.0** - Stable API
-- **v2.0.0+** - Breaking changes only in major versions
+- From 0.5: [MIGRATION-0.6.md](./MIGRATION-0.6.md)
+- From 0.4: [MIGRATION-0.5.md](./MIGRATION-0.5.md)
+- From 0.3.x: [MIGRATION-0.4.md](./MIGRATION-0.4.md)
+- What may change between releases from 1.0 on: [COMPATIBILITY.md](./COMPATIBILITY.md)

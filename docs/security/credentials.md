@@ -1,14 +1,14 @@
-# 凭证管理最佳实践
+# Managing Credentials
 
-本文档说明如何安全地管理 BucketDB 云存储适配器（AWS S3、阿里云 OSS）的访问凭证。
+How to handle the access credentials of BucketDB's cloud storage adapters (AWS S3, Alibaba Cloud OSS) safely.
 
-## ⚠️ 安全原则
+## Security principles
 
-### 绝对禁止
+### Never
 
-❌ **硬编码凭证**
+**Hard-code credentials**
 ```typescript
-// 危险！永远不要这样做
+// Dangerous: never do this
 const s3Adapter = new S3Adapter({
   bucket: 'my-bucket',
   credentials: {
@@ -18,33 +18,33 @@ const s3Adapter = new S3Adapter({
 });
 ```
 
-❌ **提交凭证到 Git**
-- 不要将 `.env` 文件提交到版本控制
-- 检查 `.gitignore` 包含敏感文件
+**Commit credentials to Git**
+- Do not put `.env` files under version control
+- Check that `.gitignore` lists the files holding secrets
 
-❌ **在日志中打印凭证**
+**Print credentials in logs**
 ```typescript
-// 危险！
+// Dangerous
 console.log('Using credentials:', credentials);
 ```
 
-❌ **在客户端代码中暴露凭证**
-- 永远不要在浏览器端使用长期凭证
-- 使用临时凭证或预签名 URL
+**Expose credentials in client-side code**
+- Never use long-lived credentials in a browser
+- Use temporary credentials or presigned URLs
 
 ---
 
-## ✅ 推荐实践
+## Recommended practices
 
-### 凭证从哪里来
+### Where credentials come from
 
-`S3Adapter` 和 `OSSAdapter` 使用内置客户端，不依赖任何 SDK。`credentials` 参数有三种写法：
+`S3Adapter` and `OSSAdapter` use a built-in client and depend on no SDK. The `credentials` option takes one of three forms:
 
-| 写法 | 行为 |
+| Form | Behaviour |
 |---|---|
-| 省略 | 第一次请求时从环境变量读取：S3 读 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN`；OSS 读 `OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET`、`OSS_SESSION_TOKEN`。缺少时抛 `ValidationError` |
-| 对象 `{ accessKeyId, secretAccessKey, sessionToken? }` | 固定使用这组凭证 |
-| 异步函数 `() => Promise<Credentials>` | 结果被缓存；返回值带 `expiresAt` 时，在到期前 5 分钟再次调用；调用失败不缓存，下次请求重新调用 |
+| omitted | Read from environment variables on the first request. S3: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`. OSS: `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_SESSION_TOKEN`; when those are unset, `ALIBABA_CLOUD_ACCESS_KEY_ID`, `ALIBABA_CLOUD_ACCESS_KEY_SECRET`, `ALIBABA_CLOUD_SECURITY_TOKEN`. Missing variables throw `ValidationError` |
+| object `{ accessKeyId, secretAccessKey, sessionToken? }` | This fixed set is used |
+| async function `() => Promise<Credentials>` | The result is cached; if it carries `expiresAt`, the function is called again 5 minutes before that time. A failed call is not cached; the next request calls it again |
 
 ```typescript
 interface Credentials {
@@ -56,25 +56,34 @@ interface Credentials {
 type CredentialProvider = () => Promise<Credentials>;
 ```
 
-内置客户端**不会**访问 EC2 实例元数据、ECS 容器凭证端点或 `~/.aws/credentials`。在这些环境里使用 IAM 角色 / RAM 角色时，用一个异步函数取得临时凭证并返回 `expiresAt`（见下文第 3、4 节）。AWS Lambda 会把角色的临时凭证放进 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_SESSION_TOKEN` 环境变量，省略 `credentials` 即可。
+Region and endpoint have environment defaults too:
+
+| Adapter | `region` | `endpoint` |
+|---|---|---|
+| `S3Adapter` | `AWS_REGION`, then `AWS_DEFAULT_REGION` | `AWS_ENDPOINT_URL_S3`, then `AWS_ENDPOINT_URL`, then `https://s3.<region>.amazonaws.com` |
+| `OSSAdapter` | `OSS_REGION` | `https://s3.oss-<region>.aliyuncs.com`; no environment variable (`OSS_ENDPOINT` is not read) |
+
+A missing region throws `ValidationError` when the adapter is constructed.
+
+The built-in client does **not** read EC2 instance metadata, the ECS container credentials endpoint or `~/.aws/credentials`. To use an IAM role or RAM role in those environments, fetch temporary credentials in an async function and return `expiresAt` (sections 3 and 4 below). AWS Lambda puts the role's temporary credentials in `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN`, so there you can omit `credentials`.
 
 ---
 
-### 1. 使用环境变量
+### 1. Environment variables
 
-在本地开发或容器环境中，使用环境变量，代码里不出现凭证：
+In local development or containers, use environment variables so no credential appears in code:
 
 ```typescript
 import { S3Adapter, OSSAdapter } from '@hold-baby/bucket-db';
 
-// 区域、端点、凭证都从 AWS_* 环境变量读取
+// Region, endpoint and credentials from AWS_* environment variables
 const s3 = new S3Adapter({ bucket: process.env.S3_BUCKET! });
 
-// 区域、凭证从 OSS_* 环境变量读取
+// Region and credentials from OSS_* (or ALIBABA_CLOUD_*) environment variables
 const oss = new OSSAdapter({ bucket: process.env.OSS_BUCKET! });
 ```
 
-**`.env` 文件**（不要提交到 Git）：
+**`.env` file** (do not commit it):
 ```bash
 AWS_REGION=us-east-1
 S3_BUCKET=my-bucket
@@ -87,33 +96,33 @@ OSS_ACCESS_KEY_ID=your_access_key
 OSS_ACCESS_KEY_SECRET=your_secret_key
 ```
 
-这些变量名与 AWS CLI、ossutil 2.0 一致。`S3_BUCKET`、`OSS_BUCKET` 是本例自己约定的名字，BucketDB 不会读取。
+These variable names match the AWS CLI and ossutil 2.0. The `ALIBABA_CLOUD_*` fallback names are the ones the Alibaba Cloud CLI and `aliyun/configure-aliyun-credentials-action` use, for example after OIDC in CI. `S3_BUCKET` and `OSS_BUCKET` are names this example chose; BucketDB does not read them.
 
-**`.gitignore`**：
+**`.gitignore`**:
 ```
 .env
 .env.local
 .env.*.local
 ```
 
-**加载环境变量**：
+**Loading the variables**:
 ```typescript
-// Node.js 22+：node --env-file=.env app.js
-// 或使用 dotenv
+// Node.js 22+: node --env-file=.env app.js
+// or use dotenv
 import 'dotenv/config';
 
-// Bun 会自动加载 .env 文件
+// Bun loads .env files automatically
 ```
 
 ---
 
-### 2. 使用密钥管理服务
+### 2. A secrets manager
 
-把凭证存放在 AWS Secrets Manager、阿里云 KMS 凭据管家等服务中，用异步函数取出。下面的 `getSecret` 代表你所用服务的客户端调用：
+Keep credentials in a service such as AWS Secrets Manager or Alibaba Cloud KMS Secrets Manager and fetch them in an async function. `getSecret` below stands for your service's client call:
 
 ```typescript
 import { S3Adapter } from '@hold-baby/bucket-db';
-import { getSecret } from './secrets'; // 你的密钥管理客户端
+import { getSecret } from './secrets'; // your secrets manager client
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -128,9 +137,9 @@ const adapter = new S3Adapter({
 });
 ```
 
-不带 `expiresAt` 时函数只调用一次；轮换长期密钥后需要重启进程，或者返回一个 `expiresAt`，让适配器定期重新读取。
+Without `expiresAt` the function is called only once; after rotating a long-lived key, restart the process, or return an `expiresAt` so the adapter reads the secret again periodically.
 
-**创建密钥（AWS）**：
+**Creating the secret (AWS)**:
 ```bash
 aws secretsmanager create-secret \
   --name bucket-db/s3-credentials \
@@ -139,13 +148,13 @@ aws secretsmanager create-secret \
 
 ---
 
-### 3. 使用临时凭证（STS）
+### 3. Temporary credentials (STS)
 
-临时凭证（AWS STS `AssumeRole`、阿里云 STS `AssumeRole`）带有 session token 和过期时间。返回 `expiresAt`，适配器会在过期前 5 分钟自动重新获取：
+Temporary credentials (AWS STS `AssumeRole`, Alibaba Cloud STS `AssumeRole`) come with a session token and an expiry time. Return `expiresAt` and the adapter fetches new ones 5 minutes before they expire:
 
 ```typescript
 import { S3Adapter } from '@hold-baby/bucket-db';
-import { assumeRole } from './sts'; // 你调用 STS 的代码
+import { assumeRole } from './sts'; // your code calling STS
 
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
@@ -153,14 +162,14 @@ const adapter = new S3Adapter({
   credentials: async () => {
     const { accessKeyId, secretAccessKey, sessionToken, expiration } = await assumeRole({
       roleArn: 'arn:aws:iam::123456789012:role/BucketDBRole',
-      durationSeconds: 3600, // 1 小时
+      durationSeconds: 3600, // 1 hour
     });
     return { accessKeyId, secretAccessKey, sessionToken, expiresAt: new Date(expiration) };
   },
 });
 ```
 
-OSS 同理：
+The same for OSS:
 
 ```typescript
 import { OSSAdapter } from '@hold-baby/bucket-db';
@@ -169,7 +178,7 @@ const adapter = new OSSAdapter({
   bucket: 'my-bucket',
   region: 'cn-hangzhou',
   credentials: async () => {
-    const sts = await assumeAliyunRole(); // 你调用阿里云 STS 的代码
+    const sts = await assumeAliyunRole(); // your code calling Alibaba Cloud STS
     return {
       accessKeyId: sts.AccessKeyId,
       secretAccessKey: sts.AccessKeySecret,
@@ -180,18 +189,18 @@ const adapter = new OSSAdapter({
 });
 ```
 
-如果临时凭证已经由外部放进环境变量（`AWS_SESSION_TOKEN` / `OSS_SESSION_TOKEN`），省略 `credentials` 即可；但环境变量只在第一次请求时读取一次，过期后不会刷新，这种情况请改用异步函数。
+If something outside your program has already put temporary credentials in the environment (`AWS_SESSION_TOKEN`, `OSS_SESSION_TOKEN` or `ALIBABA_CLOUD_SECURITY_TOKEN`), omit `credentials`. The environment is read only once, on the first request, and is not refreshed when the credentials expire; for long-running processes use an async function instead.
 
-**优点**：
-- 凭证自动过期
-- 可以限制权限范围
-- 适合分布式系统
+**Advantages**:
+- Credentials expire on their own
+- Permissions can be scoped narrowly
+- Suits distributed systems
 
 ---
 
-### 4. 在云主机上使用 IAM / RAM 角色
+### 4. IAM / RAM roles on cloud hosts
 
-在 EC2 和阿里云 ECS 上，角色凭证由实例元数据服务提供；AWS ECS 任务的角色凭证由容器凭证端点（`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`）提供。内置客户端不会自动访问这些端点，需要在异步函数里读取并返回 `expiresAt`。例如 EC2 的 IMDSv2：
+On EC2 and Alibaba Cloud ECS, role credentials come from the instance metadata service; on AWS ECS tasks, from the container credentials endpoint (`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`). The built-in client does not call these endpoints by itself: read them in an async function and return `expiresAt`. For example, EC2 with IMDSv2:
 
 ```typescript
 import { S3Adapter } from '@hold-baby/bucket-db';
@@ -217,114 +226,110 @@ async function ec2RoleCredentials() {
 const adapter = new S3Adapter({ bucket: 'my-bucket', region: 'us-east-1', credentials: ec2RoleCredentials });
 ```
 
-**优点**：
-- 凭证自动轮换
-- 无需管理密钥
-- 权限通过 IAM / RAM 策略集中管理
+**Advantages**:
+- Credentials rotate automatically
+- No keys to manage
+- Permissions are managed centrally through IAM / RAM policies
 
 ---
 
-## 🔒 凭证轮换
+## Rotating credentials
 
-凭证函数本身就是轮换机制：返回 `expiresAt`，适配器在到期前 5 分钟重新调用函数。不需要自己写缓存类。
+The credential function is the rotation mechanism: return `expiresAt` and the adapter calls the function again 5 minutes before it. You do not need your own cache.
 
 ```typescript
 const adapter = new S3Adapter({
   bucket: 'my-bucket',
   region: 'us-east-1',
   credentials: async () => {
-    const credentials = await getCredentialsFromSecretsManager(); // 你的代码
-    // 每 24 小时重新读取一次
+    const credentials = await getCredentialsFromSecretsManager(); // your code
+    // read again every 24 hours
     return { ...credentials, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) };
   },
 });
 ```
 
-不要在函数里打印返回的凭证。
+Do not log the credentials the function returns.
 
 ---
 
-## 📝 安全检查清单
+## Checklist
 
-使用此清单确保凭证安全：
-
-- [ ] 凭证存储在环境变量或密钥管理服务中
-- [ ] `.env` 文件已添加到 `.gitignore`
-- [ ] 代码中不包含硬编码的密钥
-- [ ] 日志不会打印凭证信息
-- [ ] 部署环境使用 IAM 角色或密钥管理服务
-- [ ] 定期轮换长期凭证（至少每90天）
-- [ ] 客户端使用临时凭证或预签名 URL
-- [ ] CI/CD 中使用加密的密钥变量
+- [ ] Credentials live in environment variables or a secrets manager
+- [ ] `.env` files are in `.gitignore`
+- [ ] No keys are hard-coded
+- [ ] Logs never contain credentials
+- [ ] Deployments use IAM roles or a secrets manager
+- [ ] Long-lived credentials are rotated regularly (at least every 90 days)
+- [ ] Clients use temporary credentials or presigned URLs
+- [ ] CI/CD uses encrypted secret variables or OIDC (see [examples/ci](../../examples/ci/))
 
 ---
 
-## 🚨 泄露响应
+## If credentials leak
 
-如果凭证泄露：
-
-1. **立即撤销**
+1. **Revoke them immediately**
    ```bash
    # AWS
    aws iam delete-access-key --access-key-id AKIAIOSFODNN7EXAMPLE
 
-   # 阿里云
+   # Alibaba Cloud
    aliyun ram DeleteAccessKey --UserAccessKeyId LTAI...
    ```
 
-2. **生成新凭证**
-   - 通过控制台或 CLI 创建新密钥
-   - 更新所有使用该凭证的服务
+2. **Create new credentials**
+   - Create a new key in the console or CLI
+   - Update every service that used the old one
 
-3. **检查日志**
-   - 查看 CloudTrail（AWS）或 ActionTrail（阿里云）
-   - 识别未授权的访问
+3. **Check the logs**
+   - Review CloudTrail (AWS) or ActionTrail (Alibaba Cloud)
+   - Identify unauthorized access
 
-4. **更新权限**
-   - 审查 IAM 策略
-   - 实施最小权限原则
+4. **Tighten permissions**
+   - Review IAM policies
+   - Apply least privilege
 
 ---
 
-## 📚 参考资源
+## References
 
-- [AWS IAM 最佳实践](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
+- [AWS IAM best practices](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html)
 - [AWS Secrets Manager](https://docs.aws.amazon.com/secretsmanager/)
-- [阿里云访问控制](https://help.aliyun.com/product/28625.html)
-- [阿里云密钥管理服务](https://help.aliyun.com/product/28933.html)
+- [Alibaba Cloud Resource Access Management](https://help.aliyun.com/product/28625.html)
+- [Alibaba Cloud Key Management Service](https://help.aliyun.com/product/28933.html)
 
 ---
 
-## 💡 示例项目结构
+## Example project layout
 
 ```
 my-project/
-├── .env.example          # 示例配置（提交到 Git）
-├── .env                  # 实际配置（不提交）
-├── .gitignore           # 包含 .env
+├── .env.example          # sample configuration (committed)
+├── .env                  # real configuration (not committed)
+├── .gitignore            # lists .env
 ├── src/
 │   ├── config/
-│   │   └── storage.ts   # 凭证加载逻辑
+│   │   └── storage.ts    # credential loading
 │   └── index.ts
-└── README.md            # 说明如何配置凭证
+└── README.md             # explains how to configure credentials
 ```
 
-**`.env.example`**：
+**`.env.example`**:
 ```bash
-# AWS（S3Adapter 读取 AWS_*；S3_BUCKET 由应用读取）
+# AWS (S3Adapter reads AWS_*; the application reads S3_BUCKET)
 AWS_REGION=us-east-1
 S3_BUCKET=my-bucket
 AWS_ACCESS_KEY_ID=your_access_key_here
 AWS_SECRET_ACCESS_KEY=your_secret_key_here
 
-# 阿里云（OSSAdapter 读取 OSS_*；OSS_BUCKET 由应用读取）
+# Alibaba Cloud (OSSAdapter reads OSS_*, else ALIBABA_CLOUD_*; the application reads OSS_BUCKET)
 OSS_REGION=cn-hangzhou
 OSS_BUCKET=my-bucket
 OSS_ACCESS_KEY_ID=your_access_key_here
 OSS_ACCESS_KEY_SECRET=your_secret_key_here
 ```
 
-**`src/config/storage.ts`**：
+**`src/config/storage.ts`**:
 ```typescript
 import { S3Adapter } from '@hold-baby/bucket-db';
 
@@ -334,8 +339,8 @@ export function createStorageAdapter() {
     throw new Error('Missing required environment variable: S3_BUCKET');
   }
 
-  // 区域和凭证从 AWS_* 环境变量读取：
-  // 缺少区域时构造函数抛 ValidationError，缺少凭证时第一次请求抛 ValidationError
+  // Region and credentials come from AWS_* environment variables:
+  // a missing region throws ValidationError in the constructor, missing credentials on the first request
   return new S3Adapter({ bucket });
 }
 ```

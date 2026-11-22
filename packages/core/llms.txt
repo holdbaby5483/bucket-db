@@ -110,7 +110,7 @@ Custom adapters implement StorageAdapter { capabilities, remote?, get, put, dele
 
 S3 defaults: region AWS_REGION / AWS_DEFAULT_REGION; endpoint AWS_ENDPOINT_URL_S3 / AWS_ENDPOINT_URL / https://s3.<region>.amazonaws.com; credentials AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN. Any S3-compatible service via endpoint; only AWS S3 and OSS are tested.
 OSS defaults: region OSS_REGION (`cn-hangzhou`; `oss-cn-hangzhou` also accepted); endpoint https://s3.oss-<region>.aliyuncs.com (S3-compatible; OSS_ENDPOINT is not read); credentials OSS_ACCESS_KEY_ID / OSS_ACCESS_KEY_SECRET / OSS_SESSION_TOKEN, else ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET / ALIBABA_CLOUD_SECURITY_TOKEN (aliyun/configure-aliyun-credentials-action).
-Path-style addressing is automatic for IP/localhost endpoints.
+Path-style addressing is automatic when the endpoint host is localhost or an IP address (IPv4, or IPv6 like `[::1]`); forcePathStyle overrides it.
 Retries (S3 and OSS): up to 3 attempts, per-attempt timeout 10 s (timeoutMs), on network errors, timeouts, 5xx, 429, SlowDown, RequestTimeout.
 
 ### Error mapping

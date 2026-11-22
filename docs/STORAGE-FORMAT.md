@@ -1,6 +1,6 @@
 # Storage Format
 
-What BucketDB 0.4 and 0.5 write to your bucket or directory (the format did not change in 0.5), and the rules any other reader or writer of that data must follow. The same layout is used on every backend; only S3 and OSS add a snapshot.
+What BucketDB 0.4 to 0.6 write to your bucket or directory (the format did not change in 0.5 or 0.6), and the rules any other reader or writer of that data must follow. The same layout is used on every backend; only S3 and OSS add a snapshot.
 
 ## Key layout
 

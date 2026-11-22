@@ -4,6 +4,8 @@ Produced by `packages/core/bench/run.ts` (`bun packages/core/bench/run.ts <fs|s3
 
 Setup (2026-11-21): BucketDB 0.4.0, Bun 1.4.2, macOS arm64 client. Documents of about 450 bytes. A query reads at most 16 documents in parallel. Every query is `find({ n: { $lt: 10 } })`; the filter does not change the cost, which is the same for any filter except `{ id }`.
 
+The numbers were measured on 0.4.0 and still apply to 0.6: the storage format and the requests a query makes (LIST, snapshot, individual GETs, the rewrite threshold of 16) are unchanged since. 0.5 changed query semantics and the default order, which are evaluated in memory after the documents are read, and 0.6 changed only types.
+
 Measured single-request latency from the client: OSS about 45 ms, S3 (`ap-southeast-2`) about 200 ms. Remote numbers are dominated by that round-trip time, so expect proportionally different numbers from a client closer to or further from the bucket.
 
 Columns: `requests` is the number of storage requests per operation; `ms` the mean wall time.

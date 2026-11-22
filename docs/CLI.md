@@ -29,7 +29,7 @@ The database comes from `--url <url>`, or from the `BUCKET_DB_URL` environment v
 - Omitted parameters and all credentials come from the environment, exactly as for the adapters: `AWS_REGION` / `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` for S3; `OSS_REGION`, `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_SESSION_TOKEN` for OSS, falling back to `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` / `ALIBABA_CLOUD_SECURITY_TOKEN` (what `aliyun/configure-aliyun-credentials-action` exports).
 - A URL with credentials in it (`s3://KEY:SECRET@bucket`) is refused. Error messages never repeat the URL, so `BUCKET_DB_URL` is safe to print in logs.
 
-The same URLs work in code through [`BucketDB.connect`](./API.md#static-connecturl-string-options-bucketdboptions-bucketdb).
+The same URLs work in code through [`BucketDB.connect`](./API.md#connection-urls).
 
 ### Proxies
 
