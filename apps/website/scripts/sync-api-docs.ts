@@ -50,15 +50,18 @@ console.log('✅ API 文档同步完成');
 
 /**
  * 转义 Markdown 标题中的 HTML 特殊字符
- * VitePress/Vue 会把 <T> 解析为 HTML 标签，需要转义
+ * VitePress/Vue 会把 <T> 解析为 HTML 标签，需要转义；
+ * 反引号内的行内代码不解析 HTML 实体，转义后会显示成字面的 &lt;，所以跳过
  */
 function escapeMarkdownHeadings(content: string): string {
   return content.split('\n').map(line => {
     // 只处理标题行 (以 # 开头)
-    if (line.match(/^#{1,6}\s/)) {
-      return line.replace(/<(\w+)>/g, '&lt;$1&gt;');
-    }
-    return line;
+    if (!line.match(/^#{1,6}\s/)) return line;
+    // 按反引号切分，奇数段是行内代码
+    return line
+      .split('`')
+      .map((part, index) => (index % 2 === 1 ? part : part.replace(/<(\w+)>/g, '&lt;$1&gt;')))
+      .join('`');
   }).join('\n');
 }
 
