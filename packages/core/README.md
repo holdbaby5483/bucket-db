@@ -81,9 +81,10 @@ npx @hold-baby/bucket-db doctor                                         # check 
 echo '{"ms":1234,"ok":true}' | npx @hold-baby/bucket-db put runs run-42 # create or replace
 npx @hold-baby/bucket-db find runs '{"ok":true}' --sort ms:desc --limit 5
 npx @hold-baby/bucket-db export runs > runs.jsonl                       # backup; `import` restores
+npx @hold-baby/bucket-db ui                                             # browse the database in a local web page
 ```
 
-Commands, options, output format and exit codes: [CLI.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md). Recipes for keeping CI data in a bucket with OIDC credentials: [examples/ci](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci).
+Commands, options, output format and exit codes: [CLI.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md). `ui` serves a read-only page on `127.0.0.1` for filtering, sorting and reading documents: [UI.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/UI.md). Recipes for keeping CI data in a bucket with OIDC credentials: [examples/ci](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci).
 
 ## Connection URLs
 
@@ -230,7 +231,7 @@ The S3 / OSS client uses the runtime's built-in `fetch`: Bun honours `HTTPS_PROX
 📚 https://bucket-db.pages.dev
 
 - [API reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md)
-- [CLI reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md) and [CI recipes](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci)
+- [CLI reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md), the [query UI](https://github.com/holdbaby5483/bucket-db/blob/main/docs/UI.md) and [CI recipes](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci)
 - [Guarantees and limits](https://github.com/holdbaby5483/bucket-db/blob/main/docs/GUARANTEES.md): what each backend guarantees and the test that checks it
 - [Compatibility policy](https://github.com/holdbaby5483/bucket-db/blob/main/docs/COMPATIBILITY.md): what may change between releases from 1.0 on
 - [Storage format](https://github.com/holdbaby5483/bucket-db/blob/main/docs/STORAGE-FORMAT.md): the keys and JSON BucketDB writes

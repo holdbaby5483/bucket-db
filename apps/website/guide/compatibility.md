@@ -10,7 +10,7 @@
 - **错误类**，以及 `StorageError.kind` 的四个取值（`not-found`、`conflict`、`transient`、`permanent`）。
 - **存储适配器契约**：`get`、`put`、`delete`、`list`、`capabilities`、`remote`。自定义后端依赖它。
 - **存储格式**（见[存储格式](./storage-format)）：`<dbPath>/<collection>/docs/<id>.json` 及文档内容规则。次版本和补丁版本永远不改它；任何 1.x 写入的数据，之后的每个 1.x 版本都能读取。
-- **CLI**：命令名、参数、选项、输出格式（每行一个 JSON 值，`export` 输出 JSON Lines）和退出码（0 成功、1 出错、2 未找到）。
+- **CLI**：命令名、参数、选项、输出格式（每行一个 JSON 值，`export` 输出 JSON Lines）和退出码（0 成功、1 出错、2 未找到）。对 [`bucket-db ui`](./ui) 而言，指命令名及其选项。
 - **连接串**：scheme、查询参数，以及“URL 中不得包含凭证”这条规则。
 - **[保证与限制](./guarantees)** 中列出的保证：削弱任何一条都属于破坏性变更。
 
@@ -20,6 +20,7 @@
 - 错误信息和日志的文字。请按错误类和 `kind` 判断，不要匹配消息文本。
 - [基准](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)中的请求数、延迟等数字，它们可能改进，也可能随云服务变化。
 - 查询快照的内容。快照可以随时丢弃：格式变化时改用新的带版本号的 key（`_snapshot.v2.json`），不同版本的客户端各用各的快照，永远不需要迁移。
+- `bucket-db ui` 提供的页面及其背后的 HTTP 端点。它们只为这个页面而存在，可能在任何版本中变化。
 - 文档中标明未验证或未测试的行为。
 
 ## 次版本中的新增

@@ -1,6 +1,6 @@
 # BucketDB
 
-TypeScript document database (version 0.6.1). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 22 or Bun. Includes the `bucket-db` CLI.
+TypeScript document database (version 0.7.0). Uses AWS S3 / Alibaba Cloud OSS / local filesystem / memory as backend. No database server, no runtime dependencies. Requires Node >= 22 or Bun. Includes the `bucket-db` CLI.
 
 ## Key concepts
 
@@ -138,6 +138,7 @@ export <collection>                       # JSON Lines, no _etag
 import <collection> [file]                # JSON Lines from file/stdin; lines with id written in storage format (keeps id + timestamps, overwrites); lines without id inserted; prints count
 compact <collection>                      # rebuild snapshot
 doctor                                    # check backend guarantees; writes only under <prefix>/_doctor-<time>/, cleans up
+ui [--port n] [--no-open]                 # for humans: serves a read-only browsing page on 127.0.0.1 (default port 7340) and opens the browser; runs until Ctrl+C. Do not call it from scripts or agents; use find/get
 ```
 
 stdout: one JSON value per line (jq-friendly); errors on stderr prefixed `bucket-db: `. Exit codes: 0 ok, 1 error (incl. a failed doctor check), 2 not found (get). Filters are JSON objects: `'{"ms":{"$lt":100}}'`.

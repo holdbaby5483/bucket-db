@@ -57,6 +57,7 @@ NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db c
 | `import <collection> [file]` | Write JSON Lines from a file or stdin, keeping ids and timestamps. | number of documents written |
 | `compact <collection>` | Rebuild the query snapshot (`collection.compact()`); does nothing on `file://` and `memory://`. | nothing |
 | `doctor` | Check what the storage service guarantees. | text report |
+| `ui [--port n] [--no-open]` | Serve a read-only page for browsing the database and open it in the browser; runs until Ctrl+C. See [UI.md](./UI.md). | the page's address |
 
 `filter` is a JSON object with the same operators as `find` in code ([query semantics](./API.md#query-operators)). Quote it for the shell:
 
@@ -74,13 +75,15 @@ bucket-db find runs "{\"sha\":\"$GITHUB_SHA\"}"
 | `--sort <field>[:asc\|:desc]` | `find` only. Repeat for several fields, most significant first; default direction `asc`. Without `--sort` the order is `_createdAt`, then `id`. |
 | `--limit <n>` | `find` only. At most `n` documents; `0` prints `[]`. |
 | `--offset <n>` | `find` only. Skip the first `n` matches. |
+| `--port <n>` | `ui` only. Port to listen on, on `127.0.0.1`; default `7340`, `0` picks a free one. |
+| `--no-open` | `ui` only. Print the address without opening the browser. |
 | `-h`, `--help` | Print usage and exit 0 |
 
 Options may appear anywhere on the line. A negative or fractional `--limit` / `--offset`, or a direction other than `asc` / `desc`, is an error before any request.
 
 ### Output and exit codes
 
-stdout carries data only: one JSON value per line (`find` prints its whole result as one array), so it pipes straight into `jq`. `doctor` and `--help` print plain text. Errors and warnings go to stderr, prefixed `bucket-db: `.
+stdout carries data only: one JSON value per line (`find` prints its whole result as one array), so it pipes straight into `jq`. `doctor`, `ui` and `--help` print plain text. Errors and warnings go to stderr, prefixed `bucket-db: `.
 
 | Exit code | Meaning |
 |---|---|

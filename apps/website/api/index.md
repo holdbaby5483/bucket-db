@@ -1,6 +1,6 @@
 # API 参考
 
-BucketDB 0.6.1 完整的 API 文档,需要 Node.js 22+ 或 Bun。从旧版本升级请先阅读[升级指南](/guide/migration);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 `bucket-db` 见[命令行(CLI)](/guide/cli)。
+BucketDB 0.7.0 完整的 API 文档,需要 Node.js 22+ 或 Bun。从旧版本升级请先阅读[升级指南](/guide/migration);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 `bucket-db` 见[命令行(CLI)](/guide/cli)。
 
 ## 快速导航
 

@@ -14,7 +14,7 @@ export default defineConfig({
       { text: 'API', link: '/api/' },
       { text: '示例', link: '/examples/' },
       {
-        text: 'v0.6.1',
+        text: 'v0.7.0',
         items: [
           { text: 'GitHub', link: 'https://github.com/holdbaby5483/bucket-db' },
           { text: 'Changelog', link: 'https://github.com/holdbaby5483/bucket-db/releases' },
@@ -48,6 +48,7 @@ export default defineConfig({
           items: [
             { text: 'MCP 集成', link: '/guide/mcp' },
             { text: '命令行（CLI）', link: '/guide/cli' },
+            { text: '查询界面（UI）', link: '/guide/ui' },
             { text: 'CI 中使用', link: '/guide/ci' }
           ]
         }
