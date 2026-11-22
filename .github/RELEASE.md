@@ -1,90 +1,54 @@
 # 发布指南
 
-## 自动发布流程
+`@hold-baby/bucket-db` 由 GitHub Actions（`.github/workflows/publish.yml`）发布到 npm，推送版本 tag 即触发。
 
-本项目使用 GitHub Actions 自动发布到 npm。
+## 发布步骤
 
-### 发布步骤
+1. **在 `main` 上准备版本**
+   - `packages/core/package.json` 的 `version` 改为新版本号。
+   - `CHANGELOG.md` 新增 `## [x.y.z] - YYYY-MM-DD` 一节，这一节会原样成为 GitHub Release 的说明。
+   - 推送到 `main`，等 Test 工作流通过。
 
-1. **确保代码已合并到 main 分支**
+2. **打 tag 并推送**
    ```bash
-   git checkout main
-   git pull origin main
+   git tag -a v0.5.1 -m v0.5.1
+   git push origin v0.5.1
    ```
 
-2. **创建并推送版本 tag**
-   ```bash
-   # 例如发布 v0.1.1
-   git tag v0.1.1
-   git push origin v0.1.1
-   ```
+3. **工作流自动执行**
+   - 构建、运行全部测试、检查体积和依赖门禁（`packages/core/scripts/check-budget.sh`）
+   - 按 tag 设置版本号并发布到 npm，附带 provenance
+   - 用 CHANGELOG 中该版本的一节创建 GitHub Release
 
-3. **GitHub Actions 自动执行**
-   - 构建 `@bucket-db/types` 和 `@bucket-db/core`
-   - 更新 package.json 版本号
-   - 发布到 npm
-   - 创建 GitHub Release
+预发布版本（tag 中带 `-`，例如 `v0.6.0-beta.0`）以 `next` dist-tag 发布并标记为 prerelease，不会成为 `latest`。
 
-### 首次配置
+## 认证：npm trusted publishing
 
-在 GitHub 仓库中添加 npm token：
+发布不使用 npm 令牌。npm 上为本包配置了 trusted publisher，只接受 `holdbaby5483/bucket-db` 仓库中 `publish.yml` 发起的发布，认证通过 GitHub OIDC 完成（工作流需要 `id-token: write`，npm CLI ≥ 11.5.1，Node ≥ 22.14）。
 
-1. **生成 npm token**
-   ```bash
-   npm login
-   npm token create --type=automation
-   ```
-
-2. **添加到 GitHub Secrets**
-   - 访问：https://github.com/holdbaby5483/bucket-db/settings/secrets/actions
-   - 点击「New repository secret」
-   - Name: `NPM_TOKEN`
-   - Value: 粘贴刚生成的 token
-   - 点击「Add secret」
-
-### 版本号规范
-
-遵循语义化版本（Semantic Versioning）：
-
-- `v0.1.0` → `v0.1.1`：补丁版本（bug 修复）
-- `v0.1.0` → `v0.2.0`：次版本（新功能，向后兼容）
-- `v0.1.0` → `v1.0.0`：主版本（破坏性变更）
-
-### 手动发布（备用方案）
-
-如果 CI/CD 失败，可以手动发布：
+查看或修改配置（需要 npm 账号两步验证）：
 
 ```bash
-# 1. 构建
-cd packages/core && bun run build
-
-# 2. 更新版本号
-npm version <new-version> --no-git-tag-version
-
-# 3. 发布
-npm login
-npm publish --access public
+npx npm@11 trust list @hold-baby/bucket-db
+npx npm@11 trust github @hold-baby/bucket-db --file publish.yml --repo holdbaby5483/bucket-db --allow-publish
 ```
 
-### 验证发布
+工作流文件改名时必须同步更新这里的配置，否则发布会以 E404 失败。
+
+## 验证发布
 
 ```bash
-# 检查 npm 上的版本
-npm view @hold-baby/bucket-db version
-
-# 测试安装
-mkdir test-install && cd test-install
-npm init -y
-npm install @hold-baby/bucket-db
+npm view @hold-baby/bucket-db dist-tags
+npx -y @hold-baby/bucket-db --help
 ```
 
 ## 常见问题
 
-**Q: 发布失败显示 401 Unauthorized**
-A: NPM_TOKEN 过期或无效，重新生成并更新 GitHub Secret
+**Q: `npm publish` 报 E404 Not Found**
+A: npm 对认证失败的 scoped 包写入返回 404。检查 trusted publisher 配置是否指向当前仓库和 `publish.yml`，以及工作流是否仍有 `id-token: write`。
 
 **Q: 版本号冲突**
-A: 该版本号已存在，需要使用新的版本号
+A: npm 上已存在该版本，换一个新版本号；已发布的版本不能覆盖。
 
-**Q: 包依赖错误**
-A: 确保 @bucket-db/types 先于 @bucket-db/core 发布
+**Q: 弃用旧版本**
+A: `npm deprecate "@hold-baby/bucket-db@<range>" "<说明>"`，需要 npm 登录和两步验证。

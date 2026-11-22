@@ -59,12 +59,10 @@ jobs:
           sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" package.json
 
       # Authenticates through the npm trusted publisher configured for this
-      # repository and workflow; NPM_TOKEN is only a fallback.
+      # repository and workflow (GitHub OIDC); no npm token is stored.
       - name: Publish @hold-baby/bucket-db
         working-directory: packages/core
         run: npm publish --access public ${{ steps.version.outputs.PRERELEASE == 'true' && '--tag next' || '' }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         env:
