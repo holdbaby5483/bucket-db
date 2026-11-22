@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bucket-db</title>
+<style nonce="__NONCE__">
+:root { color-scheme: light dark; --bg: #fff; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --soft: #f6f8fa; --accent: #0969da; --bad: #cf222e; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8d96a0; --line: #30363d; --soft: #161b22; --accent: #4493f8; --bad: #f85149; } }
+* { box-sizing: border-box; }
+body { margin: 0; height: 100vh; display: grid; grid-template-rows: auto 1fr; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; }
+code, pre, td, #filter { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+body > header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+#url { color: var(--muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { color: var(--muted); border: 1px solid var(--line); border-radius: 10px; padding: 0 8px; font-size: 12px; }
+main { display: grid; grid-template-columns: 210px minmax(0, 1fr) 340px; min-height: 0; }
+nav, aside { overflow: auto; padding: 10px; }
+nav { border-right: 1px solid var(--line); }
+aside { border-left: 1px solid var(--line); }
+h2 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+ul { list-style: none; margin: 0; padding: 0; }
+nav a { display: flex; justify-content: space-between; gap: 8px; padding: 4px 8px; border-radius: 5px; color: inherit; text-decoration: none; }
+nav a span { overflow: hidden; text-overflow: ellipsis; }
+nav a:hover, nav a.on { background: var(--soft); }
+nav a.on { font-weight: 600; }
+small, .note { color: var(--muted); font-size: 12px; }
+.note { margin: 8px 0; }
+#results { display: grid; grid-template-rows: auto auto auto 1fr auto auto; min-height: 0; padding: 10px 12px; gap: 6px; }
+#results.busy { opacity: .55; }
+form { display: flex; gap: 6px; margin: 0; }
+input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--fg); font-size: 13px; }
+button { padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--soft); color: var(--fg); font: inherit; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .45; cursor: default; }
+#error, #warnings { color: var(--bad); margin: 0; white-space: pre-wrap; }
+#status { margin: 0; }
+.scroll { overflow: auto; border: 1px solid var(--line); border-radius: 6px; min-height: 0; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: 4px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+th { position: sticky; top: 0; z-index: 1; background: var(--soft); font-size: 12px; cursor: pointer; user-select: none; }
+tbody tr { cursor: pointer; background: var(--bg); }
+tbody tr:hover { background: var(--soft); }
+tbody tr.on { background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+th:first-child, td:first-child { position: sticky; left: 0; }
+th:first-child { z-index: 2; }
+td:first-child { background: inherit; font-weight: 600; }
+td.number { text-align: right; }
+td.null, td.boolean, td.object { color: var(--muted); }
+#results footer, aside header { display: flex; align-items: center; gap: 8px; }
+#range, #doc-id { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+pre { margin: 8px 0 0; white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 900px) { main { grid-template-columns: 170px minmax(0, 1fr); } aside { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>bucket-db</strong>
+  <code id="url"></code>
+  <span class="badge" id="read-only"></span>
+  <button type="button" id="refresh">Refresh</button>
+</header>
+<main>
+  <nav>
+    <h2 id="collections-title">Collections</h2>
+    <ul id="collections"></ul>
+    <p class="note" id="scan"></p>
+    <form id="open"><input id="name" aria-label="Open a collection by name" autocomplete="off" spellcheck="false"></form>
+  </nav>
+  <section id="results">
+    <form id="query">
+      <input id="filter" aria-label="Filter" list="history" autocomplete="off" spellcheck="false">
+      <datalist id="history"></datalist>
+      <button type="submit" class="primary" id="run">Query</button>
+    </form>
+    <p class="note" id="status"></p>
+    <p id="error"></p>
+    <div class="scroll"><table><thead></thead><tbody></tbody></table></div>
+    <footer><span class="note" id="range"></span><button type="button" id="prev">Previous</button><button type="button" id="next">Next</button></footer>
+    <ul id="warnings"></ul>
+  </section>
+  <aside>
+    <header><strong id="doc-id"></strong><button type="button" id="copy" hidden>Copy</button></header>
+    <pre id="doc"></pre>
+  </aside>
+</main>
+<script nonce="__NONCE__">
+const zh = navigator.language.toLowerCase().startsWith('zh');
+const T = zh ? {
+  collections: '集合', open: '输入集合名打开', scanning: '正在扫描…', truncated: '列表可能不完整。', more: '继续扫描', none: '没有找到集合。',
+  filter: '筛选条件（JSON），例如 {"ok":true,"ms":{"$lt":2000}}', run: '查询', refresh: '刷新', readOnly: '不修改文档',
+  pick: '请选择一个集合。', empty: '没有匹配的文档。', select: '点击一行查看完整文档。', copy: '复制', copied: '已复制', prev: '上一页', next: '下一页',
+  status: (n, ms, at) => `匹配 ${n} 条 · 用时 ${ms} · 读取于 ${at}`, range: (a, b, n) => `第 ${a}–${b} 条，共 ${n} 条`,
+} : {
+  collections: 'Collections', open: 'Open a collection by name', scanning: 'Scanning…', truncated: 'The list may be incomplete.', more: 'Keep scanning', none: 'No collections found.',
+  filter: 'Filter as JSON, e.g. {"ok":true,"ms":{"$lt":2000}}', run: 'Query', refresh: 'Refresh', readOnly: 'Does not modify documents',
+  pick: 'Choose a collection.', empty: 'No documents match.', select: 'Select a row to see the whole document.', copy: 'Copy', copied: 'Copied', prev: 'Previous', next: 'Next',
+  status: (n, ms, at) => `${n} matching · ${ms} · read at ${at}`, range: (a, b, n) => `${a}–${b} of ${n}`,
+};
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+let info = { url: '', pageSize: 50 };
+let listed = { collections: [], scanning: true, truncated: false };
+let result = null;
+let failure = '';
+let loaded = null;
+let sequence = 0;
+let scanTimer;
+
+/** The view lives in the URL fragment, so reload, back and a pasted link all return to it. */
+function state() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  return { c: p.get('c') ?? '', f: p.get('f') ?? '', s: p.get('s') ?? '', p: Math.max(1, Number.parseInt(p.get('p') ?? '1', 10) || 1), d: p.get('d') ?? '' };
+}
+function hashFor(next) {
+  const p = new URLSearchParams();
+  for (const [key, value] of Object.entries(next)) if (value && !(key === 'p' && value === 1)) p.set(key, value);
+  return `#${p}`;
+}
+const go = patch => { location.hash = hashFor({ ...state(), ...patch }); };
+
+async function api(path) {
+  const response = await fetch(path);
+  const body = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+  return body;
+}
+
+async function loadCollections(query = '') {
+  clearTimeout(scanTimer);
+  try {
+    listed = await api(`/api/collections${query}`);
+  } catch (error) {
+    listed = { ...listed, scanning: false, error: error.message };
+  }
+  renderCollections();
+  if (listed.scanning) scanTimer = setTimeout(loadCollections, 400);
+}
+
+function renderCollections() {
+  const { c } = state();
+  $('collections').replaceChildren(...listed.collections.map(({ name, count }) =>
+    el('li', {}, el('a', { href: hashFor({ c: name }), className: name === c ? 'on' : '' },
+      el('span', { textContent: name }), el('small', { textContent: count.toLocaleString() })))));
+  const note = $('scan');
+  note.replaceChildren();
+  if (listed.scanning) note.textContent = T.scanning;
+  else if (listed.error) note.textContent = listed.error;
+  else if (listed.truncated) note.append(`${T.truncated} `, el('button', { type: 'button', textContent: T.more, onclick: () => loadCollections('?more=1') }));
+  else if (!listed.collections.length) note.textContent = T.none;
+}
+
+const historyKey = collection => `bucket-db-ui:${info.url}:${collection}`;
+function recent(collection) {
+  try {
+    return JSON.parse(localStorage.getItem(historyKey(collection)) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+function remember(collection, filter) {
+  if (!filter) return;
+  const next = [filter, ...recent(collection).filter(item => item !== filter)].slice(0, 20);
+  try {
+    localStorage.setItem(historyKey(collection), JSON.stringify(next));
+  } catch { /* storage unavailable: history is a convenience */ }
+}
+
+async function load(refresh = false) {
+  const { c, f, s, p } = state();
+  const mine = ++sequence;
+  loaded = JSON.stringify([c, f, s, p]);
+  $('filter').value = f;
+  $('history').replaceChildren(...recent(c).map(value => el('option', { value })));
+  if (!c) {
+    result = null;
+    failure = '';
+    return render();
+  }
+  const params = new URLSearchParams({ collection: c, filter: f, sort: s, page: p });
+  if (refresh) params.set('refresh', '1');
+  $('results').classList.add('busy');
+  try {
+    const found = await api(`/api/find?${params}`);
+    if (mine !== sequence) return;
+    result = found;
+    failure = '';
+    remember(c, f);
+  } catch (error) {
+    if (mine !== sequence) return;
+    result = null;
+    failure = error.message;
+  }
+  $('results').classList.remove('busy');
+  render();
+}
+
+const shortTime = new Intl.DateTimeFormat(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+function cell(value, name) {
+  if (value === undefined) return el('td');
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  // Timestamps are shown short and local; the stored ISO string stays in the tooltip and the document pane.
+  const time = name.startsWith('_') && typeof value === 'string' ? new Date(value) : undefined;
+  if (time && !Number.isNaN(time.getTime())) return el('td', { textContent: shortTime.format(time), title: text });
+  return el('td', { textContent: text.length > 80 ? `${text.slice(0, 79)}…` : text, title: text.length > 80 ? text.slice(0, 2000) : '', className: value === null ? 'null' : typeof value });
+}
+
+function render() {
+  const { c, s, p, d } = state();
+  document.title = c ? `${c} · bucket-db` : 'bucket-db';
+  $('error').textContent = failure;
+  const documents = result?.documents ?? [];
+  const tail = ['_createdAt', '_updatedAt'];
+  const seen = new Set(documents.flatMap(Object.keys));
+  for (const name of ['id', '_etag', ...tail]) seen.delete(name);
+  const columns = documents.length ? ['id', ...seen, ...tail.filter(name => documents.some(doc => name in doc))] : [];
+  const [sortField, sortDirection] = s ? [s.slice(0, s.lastIndexOf(':')), s.slice(s.lastIndexOf(':') + 1)] : [];
+
+  $('status').textContent = !c ? T.pick : !result ? '' : !result.total ? T.empty
+    : T.status(result.total.toLocaleString(), result.ms < 1000 ? `${result.ms} ms` : `${(result.ms / 1000).toFixed(1)} s`, new Date(result.fetchedAt).toLocaleTimeString());
+  document.querySelector('thead').replaceChildren(el('tr', {}, ...columns.map(name => {
+    const next = sortField !== name ? `${name}:asc` : sortDirection === 'asc' ? `${name}:desc` : '';
+    return el('th', { textContent: name + (sortField === name ? (sortDirection === 'asc' ? ' ▲' : ' ▼') : ''), onclick: () => go({ s: next, p: 1, d: '' }) });
+  })));
+  document.querySelector('tbody').replaceChildren(...documents.map(doc => {
+    const row = el('tr', { className: doc.id === d ? 'on' : '', tabIndex: 0, onclick: () => go({ d: doc.id }) }, ...columns.map(name => cell(doc[name], name)));
+    row.onkeydown = event => { if (event.key === 'Enter') go({ d: doc.id }); };
+    return row;
+  }));
+
+  const first = (p - 1) * info.pageSize;
+  $('range').textContent = documents.length ? T.range(first + 1, first + documents.length, result.total.toLocaleString()) : '';
+  $('prev').disabled = p <= 1;
+  $('next').disabled = !result || first + documents.length >= result.total;
+  $('warnings').replaceChildren(...(result?.warnings ?? []).map(textContent => el('li', { textContent })));
+
+  const selected = documents.find(doc => doc.id === d);
+  $('doc-id').textContent = selected ? selected.id : '';
+  const { id, _createdAt, _updatedAt, _etag, ...fields } = selected ?? {};
+  $('doc').textContent = selected ? JSON.stringify({ id, ...fields, _createdAt, _updatedAt, _etag }, null, 2) : documents.length ? T.select : '';
+  $('copy').hidden = !selected;
+  $('copy').textContent = T.copy;
+}
+
+addEventListener('hashchange', () => {
+  const { c, f, s, p } = state();
+  renderCollections();
+  if (JSON.stringify([c, f, s, p]) === loaded) render();
+  else load();
+});
+$('query').onsubmit = event => {
+  event.preventDefault();
+  const before = location.hash;
+  go({ f: $('filter').value.trim(), p: 1, d: '' });
+  if (location.hash === before) load(true);
+};
+$('open').onsubmit = event => {
+  event.preventDefault();
+  const name = $('name').value.trim();
+  if (name) location.hash = hashFor({ c: name });
+  $('name').value = '';
+};
+$('prev').onclick = () => go({ p: state().p - 1, d: '' });
+$('next').onclick = () => go({ p: state().p + 1, d: '' });
+$('refresh').onclick = () => { loadCollections('?refresh=1'); load(true); };
+$('copy').onclick = async () => {
+  await navigator.clipboard.writeText($('doc').textContent);
+  $('copy').textContent = T.copied;
+};
+
+document.documentElement.lang = zh ? 'zh-CN' : 'en';
+$('collections-title').textContent = T.collections;
+$('name').placeholder = $('name').ariaLabel = T.open;
+$('filter').placeholder = $('filter').ariaLabel = T.filter;
+for (const id of ['run', 'refresh', 'prev', 'next']) $(id).textContent = T[id];
+$('read-only').textContent = T.readOnly;
+api('/api/info').then(value => {
+  info = value;
+  $('url').textContent = info.url;
+  load();
+}, error => { $('error').textContent = error.message; });
+loadCollections();
+</script>
+</body>
+</html>
