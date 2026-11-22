@@ -5,6 +5,7 @@ import { BucketDB } from './bucket-db.js';
 import { BucketDBError, ValidationError } from './errors.js';
 import { docsPrefix, validateName } from './keys.js';
 import { doctor } from './doctor.js';
+import { runUi } from './ui/server.js';
 import { openUrl } from './url.js';
 
 const USAGE = `Usage: bucket-db <command> [arguments] [--url <url>]
@@ -19,6 +20,7 @@ const USAGE = `Usage: bucket-db <command> [arguments] [--url <url>]
   import <collection> [file]       write JSON Lines from a file or stdin; documents keep id and timestamps
   compact <collection>             rebuild the query snapshot
   doctor                           check what the storage service guarantees
+  ui [--port n] [--no-open]        browse the database in a local web page (default port 7340)
 
 The URL comes from --url or BUCKET_DB_URL: s3://bucket/prefix?region=…,
 oss://bucket/prefix?region=…, file:///dir. Credentials come from the
@@ -56,6 +58,8 @@ async function main(): Promise<number> {
       limit: { type: 'string' },
       offset: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
+      port: { type: 'string' },
+      'no-open': { type: 'boolean' },
     },
   });
   const [command, name, ...args] = positionals;
@@ -66,6 +70,10 @@ async function main(): Promise<number> {
 
   const { adapter, dbPath } = openUrl(values.url);
   if (command === 'doctor') return (await doctor(adapter, dbPath, line => console.log(line))) > 0 ? 1 : 0;
+  if (command === 'ui') {
+    const label = values.url ?? process.env.BUCKET_DB_URL ?? '';
+    return runUi(adapter, dbPath, { label, port: values.port, open: !values['no-open'] });
+  }
 
   const db = new BucketDB(adapter, dbPath, { logger: ({ message }) => console.error(`bucket-db: ${message}`) });
   const collection = db.collection<Record<string, unknown> & { id: string }>(required(name, 'collection'));

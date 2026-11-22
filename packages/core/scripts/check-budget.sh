@@ -7,7 +7,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 dependencies=$(node -p "Object.keys(require('./package.json').dependencies ?? {}).length")
-source_lines=$(find src -name '*.ts' -exec cat {} + | wc -l | tr -d ' ')
+# The library and CLI keep the original budget; the query UI (src/ui, `bucket-db ui`) has its own.
+source_lines=$(find src -name '*.ts' -not -path 'src/ui/*' -exec cat {} + | wc -l | tr -d ' ')
+ui_lines=$(find src/ui -name '*.ts' -exec cat {} + | wc -l | tr -d ' ')
 tarball=$(npm pack --silent --pack-destination "$work")
 packed_bytes=$(wc -c < "$work/$tarball" | tr -d ' ')
 (
@@ -29,4 +31,5 @@ check 'installed packages' "$installed_packages" 1 ''
 check 'installed size' "$installed_bytes" 204799 B
 check 'tarball size' "$packed_bytes" 51200 B
 check 'source lines' "$source_lines" 2070 ''
+check 'ui server lines' "$ui_lines" 300 ''
 exit $failed
