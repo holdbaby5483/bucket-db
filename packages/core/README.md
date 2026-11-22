@@ -509,7 +509,7 @@ A custom `StorageAdapter` can set `readonly remote = true` to get the query snap
 
 ## Documentation
 
-📚 https://bucket-db.vercel.app
+📚 https://bucket-db.pages.dev
 
 - [API reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/API.md)
 - [CLI reference](https://github.com/holdbaby5483/bucket-db/blob/main/docs/CLI.md) and [CI recipes](https://github.com/holdbaby5483/bucket-db/tree/main/examples/ci)

@@ -1,5 +1,7 @@
 # 文档站部署说明
 
+线上地址：https://bucket-db.pages.dev（Cloudflare Pages，推送到 `main` 自动部署）
+
 ## Cloudflare Pages 部署配置
 
 ### 构建配置
@@ -53,15 +55,6 @@ bun run preview
 ```
 
 访问 `http://localhost:4173` 查看构建结果
-
-### Vercel 备选方案
-
-如果需要切换到 Vercel，已有配置文件 `vercel.json`：
-```bash
-npm i -g vercel
-cd apps/website
-vercel --prod
-```
 
 ## 监控与维护
 

@@ -22,7 +22,7 @@ See [docs/CLI.md](docs/CLI.md), the [CI recipes](examples/ci/) and, upgrading fr
 
 ## Documentation
 
-📚 https://bucket-db.vercel.app
+📚 https://bucket-db.pages.dev
 
 ## Packages
 

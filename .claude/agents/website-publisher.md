@@ -14,7 +14,6 @@ tools: Bash, Read, Edit, Grep, Glob, WebFetch
 - **托管**：Cloudflare Pages（配置见 `apps/website/DEPLOYMENT.md`）
 - **触发方式**：push 到 `main` 分支自动构建 + 部署
 - **构建时间**：约 2-3 分钟
-- **备选方案**：Vercel（`apps/website/vercel.json`）— 仅在用户明确要求时使用
 
 ## 发布流程（严格顺序，不可跳步）
 
@@ -211,7 +210,6 @@ git push origin main
 - ❌ 在非 main 分支发起发布
 - ❌ 没有用户确认就 push
 - ❌ 为了"让构建通过"而修改代码（构建失败是信号，不是障碍）
-- ❌ 自动切换到 Vercel 备选方案
 
 ## 关键原则
 
