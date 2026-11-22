@@ -151,4 +151,4 @@
 - **0.3.x 与 0.4 及以后的版本不能同时写入同一集合。** 0.3 只读取自己的索引，看不到后续版本的写入。0.4、0.5 与 0.6 写入格式和写入代码路径相同，可以共用一个集合；这一点来自代码层面的判断，没有测试覆盖。
 - **云服务中只测试了 AWS S3 和阿里云 OSS。** 其他 S3 兼容服务可以通过 `endpoint` 尝试使用；CI 中用 SeaweedFS 作为本地替代。
 - **OSS 上 LIST 的写后读一致性是观察结果，而非承诺。** AWS 文档承诺 LIST 强一致；对 OSS，storage contract A7 持续在真实服务上检查。
-- **是否走代理取决于运行时。** S3 / OSS 客户端使用内置的 `fetch`。通过 CONNECT 代理访问真实 S3 实测：Bun 1.4.2 默认遵循 `HTTPS_PROXY`；Node 22.23.5 和 24.22.3 忽略 `HTTP_PROXY` / `HTTPS_PROXY` 并直接连接，除非设置 `NODE_USE_ENV_PROXY=1`（Node 22.21.0+ / 24.0.0+）或使用 `--use-env-proxy`（22.21.0+ / 24.5.0+），Node 将其标记为 "Stability 1.1 – Active development"。这是手动检查，CI 中没有测试；`NO_PROXY` 的处理尚未测试。见[命令行 · 代理](/guide/cli#代理)。
+- **是否走代理取决于运行时。** S3 / OSS 客户端使用内置的 `fetch`。通过 CONNECT 代理访问真实 S3 实测：Bun 1.4.2 默认遵循 `HTTPS_PROXY`；Node 22.23.5 和 24.22.3 忽略 `HTTP_PROXY` / `HTTPS_PROXY` 并直接连接，除非设置 `NODE_USE_ENV_PROXY=1`（Node 22.21.0+ / 24.0.0+）或使用 `--use-env-proxy`（22.21.0+ / 24.5.0+），Node 将其标记为 "Stability 1.1 – Active development"。两者都遵循 `NO_PROXY`（完整主机名、带或不带前导点的域名后缀、`*`；在 Bun 1.4.2 和 Node 24.22.3 上实测）。这是手动检查，CI 中没有测试。见[命令行 · 代理](/guide/cli#代理)。

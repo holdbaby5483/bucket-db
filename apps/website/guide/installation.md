@@ -170,7 +170,7 @@ S3 / OSS 客户端使用运行时内置的 `fetch`，是否走代理取决于运
 NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
 ```
 
-`NO_PROXY` 的处理尚未测试。
+Bun 以及设置了 `NODE_USE_ENV_PROXY=1` 的 Node 都遵循 `NO_PROXY`（在 Bun 1.4.2 和 Node 24.22.3 上实测）：完整主机名、带或不带前导点的域名后缀（`.amazonaws.com`、`amazonaws.com`）以及 `*` 都会绕过代理。
 
 ## TypeScript 配置
 

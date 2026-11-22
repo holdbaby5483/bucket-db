@@ -488,7 +488,7 @@ The S3 / OSS client uses the runtime's built-in `fetch`, so proxy support is the
 NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
 ```
 
-`NO_PROXY` handling has not been tested.
+`NO_PROXY` is honoured on Bun and on Node with `NODE_USE_ENV_PROXY=1` (measured on Bun 1.4.2 and Node 24.22.3): an exact host name, a domain suffix with or without a leading dot (`.amazonaws.com`, `amazonaws.com`) and `*` all bypass the proxy.
 
 ## BucketDB
 
