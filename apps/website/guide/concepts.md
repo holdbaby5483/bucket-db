@@ -65,10 +65,12 @@ interface User extends Document {
 ```
 
 **系统字段**：
-- `id: string` - 唯一标识符（UUID v4）
-- `_etag?: string` - ETag，用于乐观锁
+- `id: string` - 唯一标识符（未指定时生成 UUID v4）
+- `_etag` - ETag，用于乐观锁；不保存在文档内容中
 - `_createdAt?: string` - 创建时间（ISO 8601）
 - `_updatedAt?: string` - 更新时间（ISO 8601）
+
+`Document` 接口中 `_etag` 是可选的（`_etag?: string`），这只是输入形状：你定义的文档类型和传入的数据可以不带它。集合返回的文档类型是 `Stored<T>` = `T & { _etag: string }`，`_etag` 一定有值（见下文）。
 
 **类型变换**：
 
@@ -105,12 +107,14 @@ type UpdateDocument<T extends Document> = Partial<Omit<T, 'id' | '_etag' | '_cre
 
 **可用适配器**：
 
-| 适配器 | 用途 | 条件写入 | 重试 | 成本 |
-|--------|------|----------|------|------|
-| MemoryStorageAdapter | 测试、本地开发 | 进程内原子 | 无 | 免费 |
-| FileSystemAdapter | 单机本地磁盘 | `insert` 跨进程原子；条件更新仅单进程 | 无 | 免费 |
-| S3Adapter | AWS S3 及 S3 兼容服务 | 服务端原子条件写入 | 最多尝试 3 次 | 按用量 |
-| OSSAdapter | 阿里云 OSS | `insert` 原子（仅限未开启版本控制的 bucket）；不支持条件更新 | 最多尝试 3 次 | 按用量 |
+| 适配器 | 用途 | 重试 | 成本 |
+|--------|------|------|------|
+| MemoryStorageAdapter | 测试、本地开发 | 无 | 免费 |
+| FileSystemAdapter | 单机本地磁盘 | 无 | 免费 |
+| S3Adapter | AWS S3 及 S3 兼容服务 | 最多尝试 3 次 | 按用量 |
+| OSSAdapter | 阿里云 OSS | 最多尝试 3 次 | 按用量 |
+
+各适配器的条件写入能力不同，见[保证与限制](./guarantees#各后端)。
 
 **选择建议**：
 - **测试** - MemoryStorageAdapter
@@ -172,7 +176,7 @@ my-app/
 
 `deleteMany(filter)` 先执行 `find(filter)`，再逐个删除匹配的文档（并发 16 个），返回匹配数量。它**不是原子的**：中途失败时已完成的删除不会恢复，调用期间写入的文档可能保留。
 
-实测耗时（见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)）：OSS 热 `find` 在 100 / 1,000 / 10,000 个文档时为 0.11 / 0.27 / 1.35 秒；S3（ap-southeast-2，测试客户端 RTT 约 200 ms）为 0.45 / 1.0 / 3.2 秒；10,000 个文档没有快照的冷查询 OSS 34 秒、S3 134 秒。FileSystem 在 10,000 个文档时每次 `find` 约 0.5 秒。
+实测耗时见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
 
 `findById` 只在文档不存在时返回 `null`；其他存储错误（网络、权限等）会抛出 `StorageError`。
 
@@ -198,7 +202,7 @@ LIST 是权威来源：快照缺失、损坏、过期、版本不同或被并发
 快照包含完整的文档内容。已删除文档的内容会留在快照中，直到快照被重写或执行 `compact()`。删除隐私敏感数据后请调用 `compact()`。
 :::
 
-**容量范围**：每个集合最多 10,000 个文档、10 MB 快照（10,000 个约 450 字节的文档快照约 5.2 MB）。超出后查询仍可用但更慢，每个 `Collection` 实例记录一次 `warn`；本地后端只检查文档数。
+**容量范围**：每个集合最多 10,000 个文档、10 MB 快照。超出后查询仍可用但更慢，每个 `Collection` 实例记录一次 `warn`；本地后端只检查文档数。详见[保证与限制](./guarantees#限制)。
 
 **一致性级别**：返回的每个文档都是某个已提交的版本，但整个结果集不是集合在某一时刻的快照。
 
@@ -278,27 +282,7 @@ async function incrementAge(id: string) {
 
 ## 保证与限制
 
-| | Memory | FileSystem | S3 | OSS |
-|---|---|---|---|---|
-| 单次写入原子 | 是 | 是 | 是 | 是 |
-| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） |
-| 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
-| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
-
-所有后端都支持多个写入进程并发执行 `insert` / `delete`；S3 上还支持多个进程并发 `update`（Memory、FileSystem 限单进程内）。实测 4 个进程各插入 25 个文档，在 FileSystem、S3 和 OSS 上全部 100 个文档可见。
-
-详见[保证与限制](./guarantees)（每条保证都注明了对应的测试）。
-
-当前版本（0.6.0）的其他限制：
-
-1. **没有事务** - 每次写入只涉及一个文档。
-2. **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。S3/OSS 上热 `find` 为 LIST + 1 次快照 GET + 变化文档的 GET；Memory/FileSystem 上每次 `find` 读取每个文件。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
-3. **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
-4. **FileSystem** - 条件更新和并发更新合并只在单个进程内有效。
-5. **不能与 0.3.x 同时写入** - 0.3.x 只读取自己的索引，看不到 0.4 的写入；同一集合不能由 0.3.x 和 0.4 客户端同时写入。详见[升级指南](./migration)。
-6. **快照包含文档内容** - 已删除文档的内容在快照重写或 `compact()` 之前仍保留。
-7. **结果不是某一时刻的快照** - 每个文档都是已提交的版本，但结果集整体不是时间点一致的。
-8. **deleteMany 不是原子的** - 中途失败时已完成的删除不会恢复。
+各后端在原子性、不存在才创建、条件更新和并发更新上的差异，以及全部已知限制（没有事务、容量范围、OSS 不支持条件更新等），统一列在[保证与限制](./guarantees)，每条保证都注明了对应的测试。
 
 ## 下一步
 

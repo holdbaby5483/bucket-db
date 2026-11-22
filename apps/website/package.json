@@ -10,7 +10,7 @@
     "sync": "bun run scripts/sync-api-docs.ts"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "^22.0.0",
     "vitepress": "^1.0.0",
     "vue": "^3.4.0"
   }

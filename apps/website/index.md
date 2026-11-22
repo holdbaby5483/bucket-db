@@ -10,7 +10,7 @@ hero:
       text: 快速开始
       link: /guide/
     - theme: alt
-      text: 升级到 0.5
+      text: 升级到 0.6
       link: /guide/migration
     - theme: alt
       text: 查看 GitHub
@@ -53,7 +53,7 @@ features:
 ## 快速示例
 
 ```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
+import { BucketDB } from '@hold-baby/bucket-db';
 import type { Document } from '@hold-baby/bucket-db';
 
 interface User extends Document {
@@ -93,18 +93,9 @@ await users.delete(user.id);
 - **云原生** - 已使用云对象存储,希望简化架构、不运维数据库
 - **类型安全** - TypeScript 项目,需要完整类型支持
 
-### ⚠️ 当前限制(0.6.0)
+### ⚠️ 限制
 
-- **没有事务** - 每次写入只涉及一个文档。
-- **容量范围** - 每个集合最多 10,000 个文档、10 MB 快照;超出后查询仍可用但更慢,并记录一次警告。实测数据见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
-- **查询成本** - S3/OSS 上热查询为 LIST + 1 次快照 GET + 变化文档的 GET;Memory/FileSystem 上每次 `find` 读取每个文件。`{ id }` 查询只读一个文档。
-- **快照包含文档内容** - 已删除文档的内容在快照重写或 `compact()` 之前仍保留在其中。
-- **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛出 `UnsupportedError`;不带 `etag` 的并发更新后写覆盖。
-- **FileSystem 的条件更新仅在单进程内有效**。
-- **0.3.x 与 0.4 不能同时写入同一集合**。
-- **deleteMany 不是原子的** - 中途失败时已删除的文档不会恢复。
-
-各存储后端的保证详见[保证与限制](/guide/guarantees)。
+没有事务,每次写入只涉及一个文档;OSS 不支持基于 `etag` 的条件更新;超出容量范围后查询会变慢。各存储后端的保证和完整的限制列表见[保证与限制](/guide/guarantees)。
 
 ### ⚡ 核心优势
 

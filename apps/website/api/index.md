@@ -1,6 +1,6 @@
 # API 参考
 
-BucketDB 0.6.0 完整的 API 文档,需要 Node.js 22+ 或 Bun。从 0.5、0.4 或 0.3.x 升级请先阅读[升级指南](/guide/migration)(涵盖 0.5 → 0.6、0.4 → 0.5 与 0.3 → 0.4);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 `bucket-db` 见[命令行(CLI)](/guide/cli)。
+BucketDB 0.6.0 完整的 API 文档,需要 Node.js 22+ 或 Bun。从旧版本升级请先阅读[升级指南](/guide/migration);各后端的保证及对应测试见[保证与限制](/guide/guarantees),存储布局见[存储格式](/guide/storage-format)。命令行工具 `bucket-db` 见[命令行(CLI)](/guide/cli)。
 
 ## 快速导航
 
@@ -40,7 +40,7 @@ const all = await users.find({});
 
 ### BucketDB
 
-入口类:存储后端加上一个 key 前缀(`dbPath`,`''` 表示 bucket 根目录),可选的第三个参数 `{ logger }` 接收快照写入失败和超出包络的警告(默认 `console.warn`)。
+入口类:存储后端加上一个 key 前缀(`dbPath`,`''` 表示 bucket 根目录),可选的第三个参数 `{ logger }` 接收快照写入失败和超出容量范围的警告(默认 `console.warn`)。
 
 `BucketDB.connect(url?, options?)` 用一个 URL 同步创建实例,省略 `url` 时读取 `BUCKET_DB_URL`:`s3://bucket/prefix?region=…`、`oss://bucket/prefix?region=…`、`file:///dir`、`memory://prefix`。路径部分成为 `dbPath`;凭证只从环境变量读取,URL 中包含凭证会被拒绝。
 
@@ -84,28 +84,9 @@ S3 与 OSS 每个请求最多尝试 3 次,单次超时默认 10 秒,重试网络
 
 详见 [存储适配器 API](./adapters)。
 
-## 各后端保证
+## 保证与限制
 
-| | Memory | FileSystem | S3 | OSS |
-|---|---|---|---|---|
-| 单次写入原子 | 是 | 是 | 是 | 是 |
-| 不存在才创建(`insert`) | 是 | 是(跨进程) | 是 | 是(仅限未开启版本控制的 bucket) |
-| 条件更新(`etag`) | 是 | 仅单进程 | 是 | 否,抛 `UnsupportedError` |
-| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否(后写覆盖) |
-
-所有后端都支持多个进程并发 `insert` / `put` / `delete`;`update` 的多进程并发仅 S3 支持(Memory、FileSystem 限单进程内)。
-
-## 使用限制
-
-1. **没有事务** - 每次写入只涉及一个文档。
-2. **包络:每个集合最多 10,000 个文档、快照最大 10 MB** - 超出后查询仍可用但越来越慢,集合会记录一次警告。实测 10,000 个文档时一次 `find`:OSS 1.35 秒、S3 3.2 秒、FileSystem 约 0.5 秒(见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md))。
-3. **查询会列出整个集合** - 在内存中过滤,`sort` / `limit` / `offset` 不减少读取。S3 / OSS 从快照取文档内容,只 GET 快照之后变更过的文档;Memory / FileSystem 每次读取全部文档。只有 `{ id: '...' }` 查询只读一个文档。
-4. **结果集不是某一时刻的快照** - 返回的每个文档都是某个已提交的版本,但查询期间写入的文档可能出现也可能不出现。
-5. **快照包含文档内容** - 已删除文档的内容会留在快照里,直到快照被重写或调用 `compact()`。
-6. **OSS 不支持条件更新** - 带 `etag` 的 `update` 抛 `UnsupportedError`;不带 `etag` 的并发 `update` 后写覆盖。
-7. **FileSystem 的条件更新仅限单进程** - `etag` 校验和并发更新合并只在同一进程内成立。
-8. **0.3.x 与 0.4 不能同时写同一个集合** - 0.3 只读自己的索引,看不到 0.4 的写入。
-9. **`deleteMany` 不是原子操作** - 中途失败时已删除的文档不会恢复,调用期间写入的文档可能不会被删除。
+各后端在单次写入原子性、不存在才创建、条件更新和并发更新上的差异,以及全部已知限制(没有事务、每个集合的容量范围、查询成本、OSS 不支持条件更新等),统一列在[保证与限制](/guide/guarantees),每条保证都注明了对应的测试。
 
 ## 类型系统
 

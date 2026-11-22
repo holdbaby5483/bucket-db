@@ -1,581 +1,183 @@
 # 高级模式示例
 
-展示 BucketDB 的高级特性和使用模式。
+几个常用的组合用法。每段代码都是完整的，可以直接复制运行（`memory://` 换成你的连接 URL 即可）。
 
-## 乐观锁模式
+BucketDB 没有事务，每次写入只涉及一个文档；各后端的保证见[保证与限制](/guide/guarantees)。
 
-### 基础用法
+## 乐观锁：读-改-写
 
-使用 ETag 检测 `update` 的并发冲突：
-
-::: warning 注意
-- BucketDB 没有事务：下面两次 `update` 是独立的写入，第二次失败时第一次不会回滚。
-- 条件更新（`etag`）在 Memory、S3 上可用；FileSystem 仅在单进程内有效；OSS 不支持，传入 `etag` 会抛出 `UnsupportedError`。
-:::
+不传 `etag` 时，`update` 在支持比较并交换的后端上已经会自动"读取 → 合并 → 条件写入"，冲突时重试，并发修改不同字段的局部更新都会生效。只有当新值依赖旧值（计数器、余额、列表追加）时，才需要自己读取文档、把 `_etag` 传给 `update`，冲突时重新读取并重新计算：
 
 ```typescript
-import { BucketDB, FileSystemAdapter, ConcurrentUpdateError } from '@hold-baby/bucket-db';
-import type { Document } from '@hold-baby/bucket-db';
+import { BucketDB, ConcurrentUpdateError } from '@hold-baby/bucket-db';
+import type { Collection, Document, Stored, UpdateDocument } from '@hold-baby/bucket-db';
 
-interface Account extends Document {
-  balance: number;
-  owner: string;
-}
-
-const db = new BucketDB(
-  new FileSystemAdapter({ basePath: './data' }),
-  'banking'
-);
-const accounts = db.collection<Account>('accounts');
-
-async function transfer(fromId: string, toId: string, amount: number) {
-  const from = await accounts.findById(fromId);
-  const to = await accounts.findById(toId);
-
-  if (!from || !to) throw new Error('Account not found');
-  if (from.balance < amount) throw new Error('Insufficient balance');
-
-  try {
-    // 使用 ETag 确保账户未被其他操作修改
-    await accounts.update(
-      fromId,
-      { balance: from.balance - amount },
-      { etag: from._etag }
-    );
-
-    await accounts.update(
-      toId,
-      { balance: to.balance + amount },
-      { etag: to._etag }
-    );
-
-    console.log('Transfer completed');
-  } catch (error) {
-    if (error instanceof ConcurrentUpdateError) {
-      console.log('Concurrent modification detected, please retry');
-      throw error;
-    }
-    throw error;
-  }
-}
-```
-
-### 自动重试模式
-
-不传 `etag` 时，`update` 在支持条件写入的后端（Memory、单进程内的 FileSystem、S3）上已经会自动"读取 → 合并 → 条件写入"，冲突时重试最多 5 次，适合只修改部分字段的场景。只有当新值依赖旧值（如余额加减）时，才需要自己用 `etag` 做读-改-写循环：
-
-```typescript
 async function updateWithRetry<T extends Document>(
   collection: Collection<T>,
   id: string,
-  updateFn: (doc: T) => UpdateDocument<T>,
-  maxRetries: number = 3
-): Promise<T> {
-  let retries = maxRetries;
-
-  while (retries > 0) {
-    const doc = await collection.findById(id);
-    if (!doc) throw new Error('Document not found');
+  change: (current: Stored<T>) => UpdateDocument<T>,
+  attempts = 3
+): Promise<Stored<T>> {
+  for (let attempt = 1; ; attempt++) {
+    const current = await collection.findById(id);
+    if (!current) throw new Error(`Document ${id} not found`);
 
     try {
-      const updates = updateFn(doc);
-      return await collection.update(id, updates, { etag: doc._etag });
+      // 返回的文档是 Stored<T>，_etag 一定有值
+      return await collection.update(id, change(current), { etag: current._etag });
     } catch (error) {
-      if (error instanceof ConcurrentUpdateError && retries > 1) {
-        retries--;
-        // 指数退避
-        await new Promise(resolve =>
-          setTimeout(resolve, 100 * (maxRetries - retries + 1))
-        );
-        continue;
-      }
-      throw error;
+      if (!(error instanceof ConcurrentUpdateError) || attempt >= attempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 100 * attempt));
     }
   }
-
-  throw new Error('Update failed after retries');
 }
 
-// 使用
-await updateWithRetry(
-  accounts,
-  'account-123',
-  (account) => ({ balance: account.balance + 100 })
-);
+interface Counter extends Document {
+  value: number;
+}
+
+const db = BucketDB.connect('memory://');
+const counters = db.collection<Counter>('counters');
+
+await counters.put('page-views', { value: 0 });
+const updated = await updateWithRetry(counters, 'page-views', c => ({ value: c.value + 1 }));
+console.log(updated.value); // 1
 ```
 
-在 OSS 上这个函数会在第一次 `update` 时抛出 `UnsupportedError`。上面的片段需要导入：
+条件更新在 OSS 上不可用（带 `etag` 的 `update` 抛出 `UnsupportedError`），在 FileSystem 上只在单进程内有效。
+
+## 分页
+
+`offset` / `limit` / `sort` 在读取并过滤之后才在内存中应用，翻到第几页请求数都一样。不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，顺序稳定，适合分页。多取一条即可判断是否还有下一页，不需要再查总数：
 
 ```typescript
-import type { Collection, UpdateDocument } from '@hold-baby/bucket-db';
-```
+import { BucketDB } from '@hold-baby/bucket-db';
+import type { Collection, Document, QueryFilter, SortSpec, Stored } from '@hold-baby/bucket-db';
 
-## 分页模式
-
-::: tip 分页成本
-`offset` / `limit` / `sort` 在读取并过滤之后才在内存中应用：除 `{ id: '...' }` 外，翻到第几页请求数都一样（S3/OSS 上每页是 LIST + 快照 GET + 变化的文档，Memory/FileSystem 上每页读取每个文件）。不传 `sort` 时默认按 `_createdAt` 升序、再按 `id` 升序，分页顺序稳定，大致等于插入顺序；需要其他顺序时传 `sort`，如 `{ sort: { _createdAt: -1 } }`。`count()` 不带过滤条件时只列举集合（每 1000 个文档一次 LIST），带过滤条件时成本与 `find` 相同。每个集合的容量范围为 10,000 个文档、10 MB 快照。
-:::
-
-### 基础分页
-
-```typescript
-interface PaginatedResult<T> {
-  data: T[];
+interface Page<T extends Document> {
+  items: Stored<T>[];
   page: number;
-  pageSize: number;
-  total: number;
   hasMore: boolean;
 }
 
-async function paginate<T extends Document>(
-  collection: any,
-  filter: any,
-  page: number,
-  pageSize: number
-): Promise<PaginatedResult<T>> {
-  const offset = (page - 1) * pageSize;
-  const [data, total] = await Promise.all([
-    collection.find(filter, { limit: pageSize + 1, offset, sort: { _createdAt: -1 } }),
-    collection.count(filter),
-  ]);
-
-  const hasMore = data.length > pageSize;
-  const results = hasMore ? data.slice(0, pageSize) : data;
-
-  return {
-    data: results,
-    page,
-    pageSize,
-    total,  // count(filter) 与 find(filter) 成本相同
-    hasMore
-  };
-}
-
-// 使用
-const result = await paginate(users, { status: 'active' }, 1, 20);
-console.log(`Page ${result.page}: ${result.data.length} items`);
-console.log(`Has more: ${result.hasMore}`);
-```
-
-### 迭代器模式
-
-```typescript
-async function* paginateAll<T extends Document>(
-  collection: any,
-  filter: any,
-  pageSize: number = 100
-): AsyncGenerator<T[], void, unknown> {
-  let offset = 0;
-
-  while (true) {
-    const batch = await collection.find(filter, { limit: pageSize, offset });
-    if (batch.length === 0) break;
-
-    yield batch;
-    offset += batch.length;
-
-    if (batch.length < pageSize) break;
-  }
-}
-
-// 使用
-for await (const batch of paginateAll(users, { status: 'active' }, 50)) {
-  console.log(`Processing ${batch.length} users`);
-  for (const user of batch) {
-    // 处理每个用户
-  }
-}
-```
-
-### 游标式分页
-
-```typescript
-interface Cursor {
-  lastId: string;
-  offset: number;
-}
-
-async function paginateWithCursor<T extends Document>(
-  collection: any,
-  filter: any,
-  cursor: Cursor | null,
-  limit: number
-) {
-  const offset = cursor?.offset || 0;
-  const data = await collection.find(filter, { limit: limit + 1, offset });
-
-  const hasMore = data.length > limit;
-  const results = hasMore ? data.slice(0, limit) : data;
-
-  const nextCursor = hasMore
-    ? { lastId: results[results.length - 1].id, offset: offset + limit }
-    : null;
-
-  return {
-    data: results,
-    nextCursor
-  };
-}
-
-// 使用
-let cursor = null;
-while (true) {
-  const result = await paginateWithCursor(users, {}, cursor, 20);
-  console.log(`Fetched ${result.data.length} users`);
-
-  if (!result.nextCursor) break;
-  cursor = result.nextCursor;
-}
-```
-
-## 多租户模式
-
-### 租户隔离
-
-每个租户使用不同的 `dbPath`，数据位于 `<dbPath>/<collection>/docs/` 下，互不可见。`dbPath` 的每一段都必须匹配 `^[A-Za-z0-9_.-]{1,255}$` 且不能以 `.` 开头，否则 `new BucketDB(...)` 同步抛出 `ValidationError`（不会被自动改写），所以请先校验租户 ID。
-
-```typescript
-import { BucketDB, FileSystemAdapter } from '@hold-baby/bucket-db';
-
-class TenantDB {
-  private adapter = new FileSystemAdapter({ basePath: './data' });
-  private dbs = new Map<string, BucketDB>();
-
-  getDB(tenantId: string): BucketDB {
-    let db = this.dbs.get(tenantId);
-    if (!db) {
-      // 例如 tenants/tenant-a → ./data/tenants/tenant-a/users/docs/...
-      db = new BucketDB(this.adapter, `tenants/${tenantId}`);
-      this.dbs.set(tenantId, db);
-    }
-    return db;
-  }
-}
-
-const tenantDB = new TenantDB();
-
-// 租户 A 的数据
-const dbA = tenantDB.getDB('tenant-a');
-const usersA = dbA.collection<User>('users');
-await usersA.insert({ name: 'Alice', email: 'alice@a.com' });
-
-// 租户 B 的数据（完全隔离）
-const dbB = tenantDB.getDB('tenant-b');
-const usersB = dbB.collection<User>('users');
-await usersB.insert({ name: 'Bob', email: 'bob@b.com' });
-```
-
-### 租户上下文
-
-```typescript
-class TenantContext {
-  private static currentTenant: string | null = null;
-
-  static setTenant(tenantId: string) {
-    this.currentTenant = tenantId;
-  }
-
-  static getTenant(): string {
-    if (!this.currentTenant) {
-      throw new Error('No tenant context set');
-    }
-    return this.currentTenant;
-  }
-
-  static clear() {
-    this.currentTenant = null;
-  }
-}
-
-// Express 中间件
-function tenantMiddleware(req: any, res: any, next: any) {
-  const tenantId = req.headers['x-tenant-id'];
-  if (!tenantId) {
-    return res.status(400).json({ error: 'Missing tenant ID' });
-  }
-
-  TenantContext.setTenant(tenantId as string);
-  next();
-  TenantContext.clear();
-}
-
-// 使用
-app.use(tenantMiddleware);
-
-app.get('/users', async (req, res) => {
-  const tenantId = TenantContext.getTenant();
-  const db = tenantDB.getDB(tenantId);
-  const users = await db.collection<User>('users').find({});
-  res.json(users);
-});
-```
-
-## 缓存模式
-
-### 应用侧内存缓存层
-
-BucketDB 本身不缓存查询结果，每次 `find` 都会先列出存储（S3/OSS 上的快照只是减少读取，不会跳过 LIST）。如有需要，可以在应用里自行包一层缓存（注意：多实例部署时各实例缓存互不感知）：
-
-```typescript
-class CachedCollection<T extends Document> {
-  private cache = new Map<string, { data: T; expiry: number }>();
-  private ttl: number;
-
-  constructor(
-    private collection: any,
-    ttl: number = 60000  // 默认 60 秒
-  ) {
-    this.ttl = ttl;
-  }
-
-  async findById(id: string): Promise<T | null> {
-    const cached = this.cache.get(id);
-    if (cached && cached.expiry > Date.now()) {
-      return cached.data;
-    }
-
-    const doc = await this.collection.findById(id);
-    if (doc) {
-      this.cache.set(id, {
-        data: doc,
-        expiry: Date.now() + this.ttl
-      });
-    }
-
-    return doc;
-  }
-
-  async update(id: string, data: Partial<T>): Promise<T> {
-    const updated = await this.collection.update(id, data);
-    this.cache.delete(id);  // 清除缓存
-    return updated;
-  }
-
-  async delete(id: string): Promise<void> {
-    await this.collection.delete(id);
-    this.cache.delete(id);
-  }
-}
-
-// 使用
-const cachedUsers = new CachedCollection(
-  db.collection<User>('users'),
-  30000  // 30 秒缓存
-);
-
-const user = await cachedUsers.findById('user-123');  // 从数据库
-const user2 = await cachedUsers.findById('user-123'); // 从缓存
-```
-
-## 批量操作模式
-
-::: warning 并发写入
-所有后端都支持并发 `insert` / `put` / `delete`。并发 `update`（不带 `etag`）在 Memory、S3 以及单进程内的 FileSystem 上会自动合并重试；在 OSS 上后写覆盖。没有事务：一批写入中途失败时，已完成的写入不会回滚。
-:::
-
-### 批量插入
-
-```typescript
-async function batchInsert<T extends Document>(
+async function findPage<T extends Document>(
   collection: Collection<T>,
-  items: InsertDocument<T>[],
-  batchSize: number = 10
-): Promise<T[]> {
-  const results: T[] = [];
-
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map(item => collection.insert(item))
-    );
-    results.push(...batchResults);
-  }
-
-  return results;
+  filter: QueryFilter<T>,
+  page: number,
+  pageSize: number,
+  sort?: SortSpec<T>
+): Promise<Page<T>> {
+  const rows = await collection.find(filter, {
+    offset: (page - 1) * pageSize,
+    limit: pageSize + 1,
+    sort
+  });
+  return { items: rows.slice(0, pageSize), page, hasMore: rows.length > pageSize };
 }
 
-// 使用
-const newUsers = [
-  { name: 'Alice', email: 'alice@example.com' },
-  { name: 'Bob', email: 'bob@example.com' },
-  { name: 'Charlie', email: 'charlie@example.com' },
-  // ... 100+ 用户
-];
+interface User extends Document {
+  name: string;
+  status: 'active' | 'inactive';
+}
 
-const inserted = await batchInsert(users, newUsers, 20);
-console.log(`Inserted ${inserted.length} users`);
+const db = BucketDB.connect('memory://');
+const users = db.collection<User>('users');
+
+const first = await findPage(users, { status: 'active' }, 1, 20, { _createdAt: -1 });
+console.log(first.items.length, first.hasMore);
+
+// 需要总数时：不带过滤条件的 count() 只做 LIST；count(filter) 的成本与一次 find 相同
+const total = await users.count();
 ```
 
-### 按已知 key 批量写入
+需要遍历全部结果时，直接调用一次 `find(filter)`：逐页循环会让每一页都重新执行一次完整查询。
 
-数据本身有稳定的 key（如外部系统 ID、提交 sha）时，用 `put(id, data)`：每次一个无条件 PUT，重复执行只会覆盖，不会产生重复，适合可重试的导入任务。`put` 整体替换文档并重置 `_createdAt`。
+## CI 中的幂等写入
+
+CI 任务会被重试或重新运行。用稳定的 key（commit sha、运行编号）作为文档 ID，配合 `put(id, data)`：每次是一次无条件 PUT，重复执行只会覆盖，不会产生重复文档。`put` 整体替换文档并重置 `_createdAt`。
 
 ```typescript
-await Promise.all(
-  externalUsers.map(u => users.put(`ext-${u.externalId}`, { name: u.name, email: u.email }))
-);
+import { BucketDB } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
+
+interface TestRun extends Document {
+  sha: string;
+  passed: boolean;
+  durationMs: number;
+}
+
+// 读取 BUCKET_DB_URL，例如 s3://ci-data/my-repo?region=us-east-1
+const db = BucketDB.connect();
+const runs = db.collection<TestRun>('test-runs');
+
+const sha = process.env.GITHUB_SHA ?? 'local';
+await runs.put(sha, { sha, passed: true, durationMs: 81234 });
 ```
 
-只想在 id 不存在时创建，用 `insert(data, { id })`（一次条件 PUT），id 已被占用时抛出 `DocumentExistsError`：
+只允许创建一次（例如"每个 sha 只发布一次"）时用 `insert(data, { id })`：一次条件 PUT，ID 已被占用时抛出 `DocumentExistsError`，多个任务并发执行时恰好一个成功：
 
 ```typescript
-import { DocumentExistsError } from '@hold-baby/bucket-db';
+import { BucketDB, DocumentExistsError } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
+interface Release extends Document {
+  sha: string;
+  publishedAt: string;
+}
+
+const db = BucketDB.connect();
+const releases = db.collection<Release>('releases');
+
+const sha = process.env.GITHUB_SHA ?? 'local';
 try {
-  await users.insert({ name: 'Alice', email: 'alice@example.com' }, { id: 'user-alice' });
+  await releases.insert({ sha, publishedAt: new Date().toISOString() }, { id: sha });
+  // 只有赢得竞争的任务会走到这里
 } catch (error) {
   if (!(error instanceof DocumentExistsError)) throw error;
-  // 已存在，跳过
+  console.log(`${sha} 已发布过，跳过`);
 }
 ```
 
-### 批量更新
+完整的 CI 用法（OIDC 凭证、命令行）见 [CI 中使用](/guide/ci)。
+
+## 多租户：每个租户一个 dbPath
+
+每个租户使用不同的 `dbPath`，数据位于 `<dbPath>/<collection>/docs/` 下，互不可见。`dbPath` 的每一段都必须匹配 `^[A-Za-z0-9_.-]{1,255}$` 且不能以 `.` 开头，否则 `new BucketDB(...)` 同步抛出 `ValidationError`（不会被改写），因此不合法的租户 ID 会在发出任何请求之前被拒绝。
 
 ```typescript
-async function batchUpdate<T extends Document>(
-  collection: Collection<T>,
-  updates: Array<{ id: string; data: UpdateDocument<T> }>,
-  batchSize: number = 10
-): Promise<T[]> {
-  const results: T[] = [];
+import { BucketDB, MemoryStorageAdapter } from '@hold-baby/bucket-db';
+import type { Document } from '@hold-baby/bucket-db';
 
-  for (let i = 0; i < updates.length; i += batchSize) {
-    const batch = updates.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map(({ id, data }) => collection.update(id, data))
-    );
-    results.push(...batchResults);
-  }
-
-  return results;
+interface User extends Document {
+  name: string;
+  email: string;
 }
+
+// 所有租户共用一个适配器；生产中换成 S3Adapter / OSSAdapter
+const adapter = new MemoryStorageAdapter();
+const tenants = new Map<string, BucketDB>();
+
+function tenantDB(tenantId: string): BucketDB {
+  let db = tenants.get(tenantId);
+  if (!db) {
+    // tenants/tenant-a/users/docs/<id>.json
+    db = new BucketDB(adapter, `tenants/${tenantId}`); // 不合法的 tenantId 抛出 ValidationError
+    tenants.set(tenantId, db);
+  }
+  return db;
+}
+
+await tenantDB('tenant-a').collection<User>('users').insert({ name: 'Alice', email: 'alice@a.com' });
+await tenantDB('tenant-b').collection<User>('users').insert({ name: 'Bob', email: 'bob@b.com' });
+
+console.log(await tenantDB('tenant-a').collection<User>('users').count()); // 1
 ```
 
-### 批量删除
-
-`deleteMany(filter)` 先执行 `find(filter)`，再以 16 个并发逐个删除匹配的文档，返回匹配数量。它**不是原子操作**：中途失败时已删除的文档不会恢复，调用期间新写入的文档可能不会被删除。
-
-```typescript
-const removed = await users.deleteMany({ status: 'inactive' });
-console.log(`Deleted ${removed} users`);
-```
-
-## 软删除模式
-
-```typescript
-interface SoftDeletable extends Document {
-  deletedAt?: string;
-  deleted?: boolean;
-}
-
-class SoftDeleteCollection<T extends SoftDeletable> {
-  constructor(private collection: any) {}
-
-  async find(filter: any): Promise<T[]> {
-    const results = await this.collection.find({
-      ...filter,
-      deleted: { $ne: true }
-    });
-    return results;
-  }
-
-  async softDelete(id: string): Promise<T> {
-    return await this.collection.update(id, {
-      deleted: true,
-      deletedAt: new Date().toISOString()
-    });
-  }
-
-  async restore(id: string): Promise<T> {
-    return await this.collection.update(id, {
-      deleted: false,
-      deletedAt: undefined
-    });
-  }
-
-  async hardDelete(id: string): Promise<void> {
-    await this.collection.delete(id);
-  }
-
-  async findDeleted(): Promise<T[]> {
-    return await this.collection.find({ deleted: true });
-  }
-
-  // 永久清除已软删除的文档（deleteMany 非原子）
-  async purge(): Promise<number> {
-    return await this.collection.deleteMany({ deleted: true });
-  }
-}
-
-// 使用
-const softDeleteUsers = new SoftDeleteCollection(
-  db.collection<User & SoftDeletable>('users')
-);
-
-await softDeleteUsers.softDelete('user-123');  // 软删除
-const active = await softDeleteUsers.find({});  // 不包含已删除
-await softDeleteUsers.restore('user-123');      // 恢复
-```
-
-`{ deleted: { $ne: true } }` 也会匹配没有 `deleted` 字段的文档（缺失字段对 `$ne` 视为匹配），所以从未软删除过的文档同样会被返回。
-
-## 审计日志模式
-
-```typescript
-interface AuditLog extends Document {
-  entity: string;
-  entityId: string;
-  action: 'create' | 'update' | 'delete';
-  changes: any;
-  userId: string;
-  timestamp: string;
-}
-
-class AuditedCollection<T extends Document> {
-  constructor(
-    private collection: Collection<T>,
-    private entity: string,
-    private auditLog: Collection<AuditLog>,
-    private userId: string
-  ) {}
-
-  async insert(data: InsertDocument<T>): Promise<T> {
-    const doc = await this.collection.insert(data);
-
-    await this.auditLog.insert({
-      entity: this.entity,
-      entityId: doc.id,
-      action: 'create',
-      changes: data,
-      userId: this.userId,
-      timestamp: new Date().toISOString()
-    });
-
-    return doc;
-  }
-
-  async update(id: string, data: UpdateDocument<T>): Promise<T> {
-    const before = await this.collection.findById(id);
-    const after = await this.collection.update(id, data);
-
-    await this.auditLog.insert({
-      entity: this.entity,
-      entityId: id,
-      action: 'update',
-      changes: { before, after },
-      userId: this.userId,
-      timestamp: new Date().toISOString()
-    });
-
-    return after;
-  }
-}
-```
-
-批量和审计示例使用的类型：`import type { Collection, InsertDocument, UpdateDocument } from '@hold-baby/bucket-db';`
+这种隔离只是 key 前缀：持有同一组凭证的代码可以读写所有租户的数据。需要权限隔离时，为每个租户使用只能访问其前缀的凭证。
 
 ## 下一步
 
 - [基础用法](./basic-usage) - 基础 CRUD 操作
 - [S3 / OSS 云存储](./production) - S3/OSS 配置
+- [错误处理](/guide/error-handling) - 错误类与 `StorageError.kind`
 - [API 参考](/api/) - 完整 API 文档

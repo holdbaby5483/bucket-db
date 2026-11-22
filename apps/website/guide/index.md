@@ -152,7 +152,7 @@ const locked = await users.update(
 );
 ```
 
-更新操作是部分更新,只修改指定的字段;`id`、`_etag`、`_createdAt`、`_updatedAt` 不能被更新。OSS 不支持带 `etag` 的更新(抛出 `UnsupportedError`),详见[核心概念](./concepts)。
+更新操作是部分更新,只修改指定的字段;`id`、`_etag`、`_createdAt`、`_updatedAt` 不能被更新。OSS 不支持带 `etag` 的更新(抛出 `UnsupportedError`),各后端的差异见[保证与限制](./guarantees)。
 
 ### 7. 删除文档
 
@@ -230,4 +230,5 @@ main().catch(console.error);
 - [查询语法](./queries) - 所有查询操作符详解
 - [API 参考](/api/) - 完整的 API 文档
 - [命令行](./cli) - 用 `npx @hold-baby/bucket-db` 在终端或 CI 中读写数据
-- [升级指南](./migration) - 从 0.4 或 0.3 升级
+- [升级指南](./migration) - 从 0.5 及更早版本升级
+- [保证与限制](./guarantees) - 各存储后端的保证和已知限制

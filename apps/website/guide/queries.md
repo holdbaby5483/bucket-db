@@ -337,9 +337,9 @@ const users = await collection.find({
 ## 性能提示
 
 - **按 ID 查找** - `findById` 或 `{ id: '...' }` 在所有后端上都只读取一个文档
-- **S3/OSS** - 热查询为 ⌈N/1000⌉ 次 LIST + 1 次快照 GET，加上自快照以来每个变化文档 1 次 GET；变化超过 16 个时还会用 1 次 PUT 重写快照。实测 OSS 热 `find` 在 100 / 1,000 / 10,000 个文档时为 0.11 / 0.27 / 1.35 秒，S3 为 0.45 / 1.0 / 3.2 秒（ap-southeast-2，RTT 约 200 ms）；没有快照的冷查询在 10,000 个文档时 OSS 34 秒、S3 134 秒，见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)
-- **Memory/FileSystem** - 每次 `find` 读取每个文件；FileSystem 在 10,000 个文档时约 0.5 秒
-- **集合规模** - 每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并通过 `logger` 记录一次警告
+- **S3/OSS** - 热查询为 ⌈N/1000⌉ 次 LIST + 1 次快照 GET，加上自快照以来每个变化文档 1 次 GET；变化超过 16 个时还会用 1 次 PUT 重写快照
+- **Memory/FileSystem** - 每次 `find` 读取每个文件
+- **集合规模** - 超出容量范围后查询仍可用但更慢，并通过 `logger` 记录一次警告；范围见[保证与限制](./guarantees#限制)，实测耗时见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)
 - **缓存结果** - BucketDB 不缓存查询结果，每次 `find` 都会先 LIST 存储；对频繁查询的结果可在应用层缓存
 
 ## 类型安全

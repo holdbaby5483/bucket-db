@@ -1,10 +1,10 @@
 # MCP 集成
 
-BucketDB 提供 MCP（Model Context Protocol）服务器（`@hold-baby/bucket-db-mcp` 0.2.0），让 AI 工具（Claude Desktop、Cursor、Cline 等）能直接通过自然语言对任意 collection 进行增删改查。
+BucketDB 仓库中包含一个 MCP（Model Context Protocol）服务器（`apps/mcp`，0.2.0），让 AI 工具（Claude Desktop、Cursor、Cline 等）能直接通过自然语言对任意 collection 进行增删改查。
 
-## 安装
+## 从源码运行
 
-MCP 服务器包是私有的，**没有发布到 npm**，需要从仓库克隆后构建：
+MCP 服务器是私有包，**没有发布到 npm**，不能用 `npm install` 或 `npx` 安装，需要克隆仓库后构建：
 
 ```bash
 git clone https://github.com/holdbaby5483/bucket-db.git
@@ -14,11 +14,13 @@ bun run --cwd packages/core build
 bun run --cwd apps/mcp build
 ```
 
-构建后用 Node 运行（命令名为 `bucket-db-mcp`）：
+构建产物是 `apps/mcp/dist/index.js`，用 Node.js 22+ 运行，通过 stdio 通信：
 
 ```bash
 BUCKET_DB_URL=file:///path/to/data node /path/to/bucket-db/apps/mcp/dist/index.js
 ```
+
+下文配置中的 `/path/to/bucket-db` 指你克隆仓库的位置。
 
 ## 配置
 
@@ -157,7 +159,7 @@ MCP 服务器提供 7 个工具。出错时以工具错误（`isError`）返回�
 
 按 ID 更新文档，支持乐观锁。文档不存在或 `etag` 冲突时返回错误。
 
-不传 `etag` 时，在 S3 和 FileSystem（单进程）上冲突会自动重新读取并重试；在 OSS 上后写覆盖。在 OSS 上传 `etag` 会返回 `UnsupportedError`。
+不传 `etag` 时，在支持比较并交换的后端上冲突会自动重新读取并重试；在 OSS 上后写覆盖。在 OSS 上传 `etag` 会返回 `UnsupportedError`。各后端的差异见[保证与限制](/guide/guarantees)。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -191,18 +193,9 @@ MCP 服务器提供 7 个工具。出错时以工具错误（`isError`）返回�
 
 ## 并发与保证
 
-MCP 服务器直接使用 BucketDB，保证与所选后端一致：
+MCP 服务器直接使用 BucketDB，保证和限制与所选后端完全一致，见[保证与限制](/guide/guarantees)。多个进程（例如 MCP 服务器与你的应用）可以同时对同一集合执行 `insert` / `put` / `delete`。
 
-| | Memory | FileSystem | S3 | OSS |
-|---|---|---|---|---|
-| 单次写入原子 | 是 | 是 | 是 | 是 |
-| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） |
-| 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
-| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
-
-多个进程（例如 MCP 服务器与你的应用）可以同时对同一集合执行 `insert` / `put` / `delete`；S3 上 `update` 也可以并发。不要让 0.3.x 客户端与 0.4 及以后的版本同时写同一集合，见[升级指南](/guide/migration)。
-
-`db_find` 和带条件的 `db_count` 在 S3/OSS 上使用集合的查询快照（LIST + 1 次快照 GET + 变化的文档），在 FileSystem/Memory 上读取每个文件；不带条件的 `db_count` 只 LIST；`{ "id": "..." }` 过滤在所有后端上只读取一个文档。每个集合的容量范围为 10,000 个文档、10 MB 快照，见[保证与限制](/guide/guarantees)。
+`db_find` 和带条件的 `db_count` 的成本与 `find` 相同；不带条件的 `db_count` 只 LIST；`{ "id": "..." }` 过滤只读取一个文档。
 
 ## 使用示例
 

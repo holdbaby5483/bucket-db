@@ -2,25 +2,11 @@
 
 使用 `S3Adapter` 和 `OSSAdapter` 把数据存到对象存储。
 
-BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何运行时依赖，需要 Node >= 22 或 Bun。`S3Adapter` 通过 `endpoint` 可以连接任何兼容 S3 的服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。需要经过 HTTP 代理访问存储时，Node 默认忽略 `HTTPS_PROXY`，需设置 `NODE_USE_ENV_PROXY=1`，见[安装指南 · 代理](/guide/installation#代理)。
+BucketDB 内置 S3 客户端（SigV4 签名基于 Web Crypto），没有任何运行时依赖，需要 Node >= 22 或 Bun。`S3Adapter` 通过 `endpoint` 可以连接任何兼容 S3 的服务（MinIO、R2 等），但目前只在 AWS S3 和阿里云 OSS 上测试过。需要经过 HTTP 代理访问存储时，Node 默认忽略 `HTTPS_PROXY`，需设置 `NODE_USE_ENV_PROXY=1`，见[命令行 · 代理](/guide/cli#代理)。
 
 ::: warning 使用前请阅读
-- OSS 不支持条件更新：带 `etag` 的 `update` 会抛出 `UnsupportedError`；不带 `etag` 的并发 `update` 后写覆盖。需要乐观锁请使用 S3。
-- 除 `{ id: '...' }` 外，`find` 使用集合的查询快照 `_snapshot.v1.json`：热查询为 LIST + 1 次快照 GET + 变化过的文档。每个集合的容量范围为 10,000 个文档、10 MB 快照。
-
-完整说明见[核心概念](/guide/concepts)。
+OSS 不支持条件更新：带 `etag` 的 `update` 会抛出 `UnsupportedError`，不带 `etag` 的并发 `update` 后写覆盖；需要乐观锁请使用 S3。各后端的保证、容量范围和其他限制见[保证与限制](/guide/guarantees)。
 :::
-
-## 一致性保证
-
-| | Memory | FileSystem | S3 | OSS |
-|---|---|---|---|---|
-| 单次写入原子 | 是 | 是 | 是 | 是 |
-| 不存在才创建（`insert`） | 是 | 是（跨进程） | 是 | 是（仅限未开启版本控制的 bucket） |
-| 条件更新（`etag`） | 是 | 仅单进程 | 是 | 否，抛 `UnsupportedError` |
-| 并发局部更新全部生效 | 是 | 仅单进程 | 是 | 否（后写覆盖） |
-
-所有后端都支持多个进程同时 `insert` / `put` / `delete`；S3 上多个进程同时 `update` 也是安全的。
 
 ## AWS S3
 
@@ -323,16 +309,9 @@ await db.collection('users').delete(userId);
 await db.collection('users').compact();
 ```
 
-实测（见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)）：热 `find` 在 100 / 1,000 / 10,000 个文档时 OSS 为 0.11 / 0.27 / 1.35 秒，S3（ap-southeast-2，RTT 约 200 ms）为 0.45 / 1.0 / 3.2 秒；10,000 个文档没有快照的冷查询 OSS 34 秒、S3 134 秒。
+## 限制
 
-## 剩余限制
-
-1. 没有事务；每次写入只涉及一个文档。`deleteMany` 逐个删除，不是原子操作。
-2. 容量范围：每个集合最多 10,000 个文档、10 MB 快照；超出后查询仍可用但更慢，并记录一次警告。
-3. OSS：不支持条件更新，带 `etag` 的 `update` 抛出 `UnsupportedError`；不带 `etag` 的并发更新后写覆盖。
-4. FileSystem：条件更新和并发更新合并只在单进程内有效。
-5. 0.3.x 和 0.4 及以后的客户端不能同时写同一个集合（0.3 只读取自己的索引，看不到后续版本的写入）。详见[升级指南](/guide/migration)。
-6. 快照包含文档内容；结果集不是某一时刻的快照。详见[保证与限制](/guide/guarantees)。
+没有事务、容量范围、OSS 与 FileSystem 的条件更新限制等完整列表见[保证与限制](/guide/guarantees#限制)；实测耗时见 [BENCHMARKS.md](https://github.com/holdbaby5483/bucket-db/blob/main/docs/BENCHMARKS.md)。
 
 ## 下一步
 

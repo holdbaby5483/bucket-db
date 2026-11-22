@@ -161,16 +161,7 @@ const s3WithProvider = new S3Adapter({
 
 ### 代理
 
-S3 / OSS 客户端使用运行时内置的 `fetch`，是否走代理取决于运行时。以下结果是通过一个 CONNECT 代理访问真实 S3 bucket 实测的：
-
-- **Bun**（1.4.2）默认遵循 `HTTPS_PROXY`。
-- **Node**（22.23.5、24.22.3）默认**忽略** `HTTP_PROXY` / `HTTPS_PROXY`，直接连接（即使配置了一个不可达的代理，请求也会成功）。设置 `NODE_USE_ENV_PROXY=1`（Node 22.21.0+ / 24.0.0+）或使用参数 `--use-env-proxy`（Node 22.21.0+ / 24.5.0+）后请求经过代理。Node 将该功能标记为 "Stability 1.1 – Active development"。
-
-```bash
-NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy:3128 npx -y @hold-baby/bucket-db count items
-```
-
-Bun 以及设置了 `NODE_USE_ENV_PROXY=1` 的 Node 都遵循 `NO_PROXY`（在 Bun 1.4.2 和 Node 24.22.3 上实测）：完整主机名、带或不带前导点的域名后缀（`.amazonaws.com`、`amazonaws.com`）以及 `*` 都会绕过代理。
+S3 / OSS 客户端使用运行时内置的 `fetch`，是否走代理取决于运行时：Bun 默认遵循 `HTTPS_PROXY`，Node 需要设置 `NODE_USE_ENV_PROXY=1`。实测结果和 `NO_PROXY` 的行为见[命令行 · 代理](./cli#代理)。
 
 ## TypeScript 配置
 
